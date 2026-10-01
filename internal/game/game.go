@@ -102,6 +102,27 @@ const (
 	// tell natural variance from noise, so they get the benefit of the
 	// doubt on this check (the WPM ceiling still applies regardless).
 	MinKeystrokeSamplesForCVCheck = 30
+
+	// GoldenWordChance is the probability a given exercise gets one rare
+	// "golden word" at all -- most exercises have none, by design (a
+	// guaranteed one every time would stop feeling like a lucky find).
+	GoldenWordChance = 0.15
+	// GoldenWordMinIndex and GoldenWordMaxIndex bound where in the word
+	// list a golden word can land: never the very first couple of words
+	// (so there's a moment to notice it coming), and not so deep into a
+	// long time-mode buffer that a typical short test would never reach
+	// it.
+	GoldenWordMinIndex = 3
+	GoldenWordMaxIndex = 60
+	// GreenWordStreakInterval marks the word right after every Nth
+	// consecutive mistake-free word as a "green word": land it clean too
+	// and it heals you. Unlike the golden word, this is fully earned, not
+	// random, and can repeat multiple times in one long streak.
+	GreenWordStreakInterval = 10
+	// GreenWordHealAmount is the flat HP restored by landing a green word
+	// -- deliberately level-independent (unlike MaxHP), so it's a
+	// meaningful save early on and a smaller but still real top-up later.
+	GreenWordHealAmount = 25
 )
 
 // IsSuspiciousRun reports whether result looks more like scripted or

@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/stats"
 )
 
@@ -22,6 +23,11 @@ func newTestTypingModel(mode testMode, wordList []string, maxHP int) typingModel
 		tracker:    stats.NewTracker(),
 		hp:         maxHP,
 		maxHP:      maxHP,
+		// -1 means "none" for both -- the zero value (0) would otherwise
+		// silently mark word index 0 as both golden and green in every
+		// test that doesn't care about that mechanic.
+		goldenWordIdx: -1,
+		greenWordIdx:  -1,
 	}
 }
 
@@ -371,5 +377,197 @@ func TestRenderHPBarClampsToValidRange(t *testing.T) {
 		if out == "" {
 			t.Fatalf("hp=%d maxHP=%d: expected non-empty output", c.hp, c.maxHP)
 		}
+	}
+}
+
+// --- Golden word (shield) and green word (heal) ---
+
+func TestRollGoldenWordIndexStaysWithinBoundsAndRespectsChance(t *testing.T) {
+	const trials = 5000
+	hits := 0
+	for range trials {
+		idx := rollGoldenWordIndex(80)
+		if idx == -1 {
+			continue
+		}
+		hits++
+		if idx < game.GoldenWordMinIndex || idx > game.GoldenWordMaxIndex {
+			t.Fatalf("golden word index %d out of bounds [%d, %d]", idx, game.GoldenWordMinIndex, game.GoldenWordMaxIndex)
+		}
+	}
+	rate := float64(hits) / trials
+	// Loose statistical bound -- just confirms it's in the right
+	// ballpark, not an exact match.
+	if rate < game.GoldenWordChance*0.7 || rate > game.GoldenWordChance*1.3 {
+		t.Fatalf("empirical golden word rate %.3f too far from configured chance %.3f", rate, game.GoldenWordChance)
+	}
+}
+
+func TestRollGoldenWordIndexNoneForShortWordLists(t *testing.T) {
+	if got := rollGoldenWordIndex(0); got != -1 {
+		t.Fatalf("expected -1 for an empty word list, got %d", got)
+	}
+	if got := rollGoldenWordIndex(game.GoldenWordMinIndex); got != -1 {
+		t.Fatalf("expected -1 when the word list isn't long enough to leave room, got %d", got)
+	}
+}
+
+func TestGoldenWordGrantsShieldOnlyWhenLandedClean(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"cat", "dog"}, 100)
+	m.goldenWordIdx = 0
+	m = typeString(m, "cat")
+	m = pressSpace(m)
+	if !m.shieldActive {
+		t.Fatal("expected a clean golden word to activate the shield")
+	}
+	if m.goldenWordIdx != -1 {
+		t.Fatal("expected goldenWordIdx consumed (reset to -1) after landing it")
+	}
+}
+
+func TestGoldenWordMissedGrantsNoShield(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"cat", "dog"}, 100)
+	m.goldenWordIdx = 0
+	m = typeString(m, "cXt") // mistake on the golden word itself
+	m = pressSpace(m)
+	if m.shieldActive {
+		t.Fatal("expected a missed golden word to NOT activate the shield")
+	}
+	if m.goldenWordIdx != -1 {
+		t.Fatal("expected the golden word opportunity consumed even when missed")
+	}
+}
+
+func TestShieldForgivesExactlyOneMistakeThenExpires(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"aaaa"}, 100)
+	m.shieldActive = true
+
+	m = typeString(m, "x") // wrong keystroke, should be absorbed
+	if m.hp != 100 {
+		t.Fatalf("expected no HP loss while the shield absorbs a mistake, got hp=%d", m.hp)
+	}
+	if m.shieldActive {
+		t.Fatal("expected the shield consumed by that mistake")
+	}
+
+	m = typeString(m, "x") // another wrong keystroke, shield is gone now
+	if m.hp >= 100 {
+		t.Fatalf("expected normal HP loss once the shield is spent, got hp=%d", m.hp)
+	}
+}
+
+func TestGreenWordAppearsAfterStreakIntervalAndHealsOnCleanCompletion(t *testing.T) {
+	wordList := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}
+	m := newTestTypingModel(modeWords, wordList, 100)
+	m.hp = 50 // leave room to observe the heal
+
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, wordList[i])
+		m = pressSpace(m)
+	}
+	if m.greenWordIdx != game.GreenWordStreakInterval {
+		t.Fatalf("expected the word right after a %d-streak marked green (index %d), got %d",
+			game.GreenWordStreakInterval, game.GreenWordStreakInterval, m.greenWordIdx)
+	}
+
+	m = typeString(m, wordList[game.GreenWordStreakInterval])
+	m = pressSpace(m)
+	if m.hp != 50+game.GreenWordHealAmount {
+		t.Fatalf("expected hp=%d after healing, got %d", 50+game.GreenWordHealAmount, m.hp)
+	}
+	if m.greenWordIdx != -1 {
+		t.Fatal("expected the green word opportunity consumed after landing it")
+	}
+}
+
+func TestGreenWordMissedGrantsNoHeal(t *testing.T) {
+	wordList := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}
+	m := newTestTypingModel(modeWords, wordList, 100)
+	m.hp = 50
+
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, wordList[i])
+		m = pressSpace(m)
+	}
+	hpBeforeGreenWord := m.hp
+	m = typeString(m, "Z") // one mistake on the green word (matches its length)
+	m = pressSpace(m)
+	// Missing it still deals normal mistake damage -- it just forfeits
+	// the bonus heal, it doesn't grant immunity.
+	if m.hp >= hpBeforeGreenWord {
+		t.Fatalf("expected normal mistake damage from missing the green word, hp went from %d to %d", hpBeforeGreenWord, m.hp)
+	}
+	if m.greenWordIdx != -1 {
+		t.Fatal("expected the green word opportunity consumed even when missed")
+	}
+}
+
+func TestGreenWordHealCapsAtMaxHP(t *testing.T) {
+	wordList := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}
+	m := newTestTypingModel(modeWords, wordList, 100)
+	m.hp = 100 // already full
+
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, wordList[i])
+		m = pressSpace(m)
+	}
+	m = typeString(m, wordList[game.GreenWordStreakInterval])
+	m = pressSpace(m)
+	if m.hp != 100 {
+		t.Fatalf("expected hp capped at maxHP=100, got %d", m.hp)
+	}
+}
+
+func TestGreenWordCanRetriggerOnLaterStreakMilestones(t *testing.T) {
+	// A long, unbroken streak should offer a new green word at every
+	// multiple of the interval, not just the first time.
+	n := game.GreenWordStreakInterval*2 + 1
+	wordList := make([]string, n)
+	for i := range wordList {
+		wordList[i] = "w"
+	}
+	m := newTestTypingModel(modeWords, wordList, 100)
+	m.hp = 10
+
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	m = typeString(m, "w") // lands the first green word
+	m = pressSpace(m)
+	afterFirstHeal := m.hp
+
+	for i := 0; i < game.GreenWordStreakInterval-1; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.greenWordIdx == -1 {
+		t.Fatal("expected a second green word opportunity at the next streak milestone")
+	}
+	m = typeString(m, "w")
+	m = pressSpace(m)
+	if m.hp <= afterFirstHeal {
+		t.Fatalf("expected a second heal to raise hp again, had %d, now %d", afterFirstHeal, m.hp)
+	}
+}
+
+func TestViewRendersGoldenAndGreenWordsDistinctly(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"alpha", "beta", "gamma"}, 100)
+	m.goldenWordIdx = 1
+	m.greenWordIdx = 2
+	view := m.View()
+	if !containsSubstring(view, "beta") || !containsSubstring(view, "gamma") {
+		t.Fatalf("expected both special words still rendered, got:\n%s", view)
+	}
+}
+
+func TestViewShowsShieldActiveIndicator(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"alpha"}, 100)
+	if containsSubstring(m.View(), "shield active") {
+		t.Fatal("expected no shield indicator before one is active")
+	}
+	m.shieldActive = true
+	if !containsSubstring(m.View(), "shield active") {
+		t.Fatal("expected a shield indicator once active")
 	}
 }

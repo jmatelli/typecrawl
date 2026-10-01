@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 	"unicode"
@@ -24,6 +25,11 @@ var (
 	comboStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
 	streakStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
 	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	// goldenWordStyle marks a rare word that grants a mistake-forgiving
+	// shield if typed clean. greenWordStyle marks a streak-earned word
+	// that heals if typed clean.
+	goldenWordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	greenWordStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
 )
 
 type tickMsg time.Time
@@ -90,6 +96,17 @@ type typingModel struct {
 	charMistakes   map[rune]int // this run's per-character mistake counts, for weak-key tracking
 
 	pasteAttempts int // pasted input events rejected this run -- see the tea.KeyRunes case
+
+	// goldenWordIdx is the word index (if any) this exercise's rare golden
+	// word landed on, fixed once at construction; -1 means this exercise
+	// has none. greenWordIdx is the word index earning a heal if typed
+	// clean, set dynamically whenever the streak hits a multiple of
+	// game.GreenWordStreakInterval; -1 means none currently pending.
+	// shieldActive is consumed by the next mistake, fully forgiving it
+	// (no HP loss, no streak break) once the golden word is landed clean.
+	goldenWordIdx int
+	greenWordIdx  int
+	shieldActive  bool
 }
 
 func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation, zenMode, focusWeak bool, weakChars map[rune]int, ghostPaceMS []int, ghostWPMSeries []float64) typingModel {
@@ -117,7 +134,25 @@ func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation,
 		ghostWPMSeries: ghostWPMSeries,
 		hp:             maxHP,
 		maxHP:          maxHP,
+		goldenWordIdx:  rollGoldenWordIndex(len(wordList)),
+		greenWordIdx:   -1,
 	}
+}
+
+// rollGoldenWordIndex decides whether this exercise gets a rare golden
+// word and, if so, where: most exercises get none at all (see
+// game.GoldenWordChance), and when one does land it's within an early,
+// likely-to-be-reached window rather than anywhere in a long time-mode
+// buffer. Returns -1 for "no golden word this exercise."
+func rollGoldenWordIndex(wordCount int) int {
+	if wordCount <= game.GoldenWordMinIndex || rand.Float64() >= game.GoldenWordChance {
+		return -1
+	}
+	hi := min(wordCount-1, game.GoldenWordMaxIndex)
+	if hi <= game.GoldenWordMinIndex {
+		return -1
+	}
+	return game.GoldenWordMinIndex + rand.Intn(hi-game.GoldenWordMinIndex+1)
 }
 
 // ghostStatus reports how far ahead (positive) or behind (negative) of the
@@ -202,10 +237,20 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			for _, r := range msg.Runes {
 				if !m.typeRune(r) {
-					m.registerMistake()
-					if m.hp <= 0 {
-						m.ko = true
-						break
+					if m.shieldActive {
+						// A landed golden word's shield fully absorbs the
+						// very next mistake: no HP loss, no streak break.
+						// The keystroke is still wrong in the buffer and
+						// needs correcting like any other typo -- the
+						// shield forgives the penalty, not the typo
+						// itself.
+						m.shieldActive = false
+					} else {
+						m.registerMistake()
+						if m.hp <= 0 {
+							m.ko = true
+							break
+						}
 					}
 				}
 			}
@@ -274,6 +319,26 @@ func (m *typingModel) completeWord() {
 	if m.current == "" || m.wordIndex >= len(m.wordList) {
 		return
 	}
+
+	// Resolve this exercise's special words, if the one just finished was
+	// one of them. Both are one-shot: landed clean or not, the
+	// opportunity is spent either way. Consistent with how backspacing
+	// across a word boundary already treats HP damage as a permanent sunk
+	// cost rather than something to undo, neither effect is reverted if
+	// the player later backspaces back into this word.
+	if m.wordIndex == m.goldenWordIdx {
+		if !m.wordHasMistake {
+			m.shieldActive = true
+		}
+		m.goldenWordIdx = -1
+	}
+	if m.wordIndex == m.greenWordIdx {
+		if !m.wordHasMistake {
+			m.hp = min(m.hp+game.GreenWordHealAmount, m.maxHP)
+		}
+		m.greenWordIdx = -1
+	}
+
 	m.commits = append(m.commits, wordCommit{
 		typed:        m.current,
 		hadMistake:   m.wordHasMistake,
@@ -292,6 +357,11 @@ func (m *typingModel) completeWord() {
 		m.successCombo++
 		m.bestCombo = max(m.bestCombo, m.successCombo)
 		m.xpBonus += game.StreakBonus(m.successCombo)
+		if m.successCombo%game.GreenWordStreakInterval == 0 {
+			// Mark the word about to become current -- not this one,
+			// which is already done.
+			m.greenWordIdx = m.wordIndex + 1
+		}
 	}
 	m.wordHasMistake = false
 
@@ -453,6 +523,9 @@ func (m typingModel) View() string {
 	if m.pasteAttempts > 0 {
 		hpLine += "  " + warnStyle.Render(fmt.Sprintf("paste blocked (%d) -- type it out", m.pasteAttempts))
 	}
+	if m.shieldActive {
+		hpLine += "  " + goldenWordStyle.Render("shield active")
+	}
 
 	lines, _ := wrapWords(m.wordList, m.pageStart, m.pageWidth(), visibleLines)
 	var body strings.Builder
@@ -463,6 +536,10 @@ func (m typingModel) View() string {
 				body.WriteString(renderWord(m.wordList[idx], m.typedWords[idx]))
 			case idx == m.wordIndex:
 				body.WriteString(renderWord(m.wordList[idx], m.current))
+			case idx == m.goldenWordIdx:
+				body.WriteString(goldenWordStyle.Render(m.wordList[idx]))
+			case idx == m.greenWordIdx:
+				body.WriteString(greenWordStyle.Render(m.wordList[idx]))
 			default:
 				body.WriteString(dimStyle.Render(m.wordList[idx]))
 			}
