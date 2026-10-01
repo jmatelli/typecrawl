@@ -121,8 +121,8 @@ func TestBuildAchievementProgressReflectsProfileFields(t *testing.T) {
 	if p.Level != 15 {
 		t.Errorf("expected Level=15, got %d", p.Level)
 	}
-	if p.TotalExercises != 10 { // SuccessCount + KOCount
-		t.Errorf("expected TotalExercises=10, got %d", p.TotalExercises)
+	if p.TotalExercises != 8 { // SuccessCount only -- KOs don't count as "completed"
+		t.Errorf("expected TotalExercises=8, got %d", p.TotalExercises)
 	}
 	if p.BestWordStreak != 30 {
 		t.Errorf("expected BestWordStreak=30, got %d", p.BestWordStreak)

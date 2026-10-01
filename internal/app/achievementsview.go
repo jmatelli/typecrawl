@@ -115,8 +115,12 @@ func buildAchievementProgress(db *sql.DB, profile *storage.Profile, dailyStreak 
 	totalPlayTime, _ := storage.TotalPlayTime(db, profile.ID)
 
 	return achievements.Progress{
-		Level:          profile.Level,
-		TotalExercises: profile.SuccessCount + profile.KOCount,
+		Level: profile.Level,
+		// Only successful (non-KO) runs count as "completed" -- a
+		// knockout already has its own dedicated achievement line (see
+		// ko_1/ko_5/ko_10), so folding it in here too would both
+		// double-count it and make "Complete X exercises" a lie.
+		TotalExercises: profile.SuccessCount,
 		BestWordStreak: profile.BestWordStreak,
 		KOCount:        profile.KOCount,
 		DailyStreak:    dailyStreak,
