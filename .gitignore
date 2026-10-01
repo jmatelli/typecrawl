@@ -1,0 +1,4 @@
+/typetui
+/dist/
+*.db
+*.sqlite
