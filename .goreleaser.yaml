@@ -56,6 +56,7 @@ brews:
     repository:
       owner: jmatelli
       name: homebrew-typecrawl
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/jmatelli/typecrawl
     description: A terminal typing test with RPG-style progression (XP, achievements, HP/combo mechanics).
     license: MIT
