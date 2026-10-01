@@ -44,6 +44,7 @@ func main() {
 	punctuationFlag := flag.Bool("punctuation", false, "quick-launch: enable punctuation (requires --time or --words)")
 	zenFlag := flag.Bool("zen", false, "quick-launch: enable zen mode (requires --time or --words)")
 	focusWeakFlag := flag.Bool("focus-weak", false, "quick-launch: bias word choice toward your weakest keys (requires --time or --words)")
+	quotesFlag := flag.Bool("quotes", false, "quick-launch: use quotes instead of random words (implies punctuation; requires --time or --words)")
 	listProfilesFlag := flag.Bool("list-profiles", false, "list saved profiles and exit")
 	exportFlag := flag.String("export", "", "export a profile's stats to this JSON file path and exit (requires --profile)")
 	var showVersion bool
@@ -65,8 +66,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: --time/--words requires --profile")
 		os.Exit(1)
 	}
-	if (*punctuationFlag || *zenFlag || *focusWeakFlag) && !hasMode {
-		fmt.Fprintln(os.Stderr, "error: --punctuation/--zen/--focus-weak requires --time or --words")
+	if (*punctuationFlag || *zenFlag || *focusWeakFlag || *quotesFlag) && !hasMode {
+		fmt.Fprintln(os.Stderr, "error: --punctuation/--zen/--focus-weak/--quotes requires --time or --words")
+		os.Exit(1)
+	}
+	if *quotesFlag && *focusWeakFlag {
+		fmt.Fprintln(os.Stderr, "error: --focus-weak cannot be combined with --quotes (weak-key biasing has no meaning over fixed quote text)")
 		os.Exit(1)
 	}
 	if *exportFlag != "" && *profileFlag == "" {
@@ -137,7 +142,7 @@ func main() {
 		return
 	}
 
-	opts := app.LaunchOptions{ProfileName: *profileFlag, Punctuation: *punctuationFlag, ZenMode: *zenFlag, FocusWeak: *focusWeakFlag}
+	opts := app.LaunchOptions{ProfileName: *profileFlag, Punctuation: *punctuationFlag, ZenMode: *zenFlag, FocusWeak: *focusWeakFlag, Quotes: *quotesFlag}
 	if *timeFlag != 0 {
 		opts.Mode = "time"
 		opts.Target = *timeFlag

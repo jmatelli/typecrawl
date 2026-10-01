@@ -140,7 +140,7 @@ func TestResetProfileKeepsNameAndAllTimeRecordsButClearsProgress(t *testing.T) {
 
 func TestSettingsRoundTrip(t *testing.T) {
 	db, p := newTestDB(t)
-	s := Settings{Mode: "words", Duration: 60, WordCount: 100, Punctuation: true, ZenMode: true, FocusWeak: true}
+	s := Settings{Mode: "words", Duration: 60, WordCount: 100, Punctuation: true, ZenMode: true, FocusWeak: true, Quotes: true}
 	if err := SaveSettings(db, p.ID, s); err != nil {
 		t.Fatal(err)
 	}
@@ -757,6 +757,68 @@ func TestDailyChallengeClaimsAreClearedOnDeleteAndReset(t *testing.T) {
 	claimed, _ := HasClaimedDailyChallenge(db, p.ID, "2026-03-15")
 	if claimed {
 		t.Fatal("expected daily challenge claims cleared on profile reset")
+	}
+}
+
+// --- Quotes cache ---
+
+func TestStoreQuotesAndCachedQuotesRoundTrip(t *testing.T) {
+	db, _ := newTestDB(t)
+	want := []CachedQuote{
+		{ID: 1, Text: "First quote.", Author: "Alice"},
+		{ID: 2, Text: "Second quote.", Author: "Bob"},
+	}
+	if err := StoreQuotes(db, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := CachedQuotes(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d cached quotes, got %d: %+v", len(want), len(got), got)
+	}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %+v among cached quotes, got %+v", w, got)
+		}
+	}
+}
+
+func TestStoreQuotesIgnoresDuplicateIDs(t *testing.T) {
+	db, _ := newTestDB(t)
+	if err := StoreQuotes(db, []CachedQuote{{ID: 1, Text: "Original.", Author: "Alice"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Re-fetching the same id with different text (as if the API changed
+	// its wording) must not overwrite the already-cached row or error.
+	if err := StoreQuotes(db, []CachedQuote{{ID: 1, Text: "Different.", Author: "Alice"}}); err != nil {
+		t.Fatalf("expected re-storing an already-cached id to be a harmless no-op, got %v", err)
+	}
+	got, err := CachedQuotes(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Text != "Original." {
+		t.Fatalf("expected the original cached row to survive untouched, got %+v", got)
+	}
+}
+
+func TestCachedQuotesEmptyWhenNothingStored(t *testing.T) {
+	db, _ := newTestDB(t)
+	got, err := CachedQuotes(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no cached quotes, got %+v", got)
 	}
 }
 

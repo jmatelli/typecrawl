@@ -49,6 +49,7 @@ type menuModel struct {
 	punctuation bool
 	zenMode     bool
 	focusWeak   bool
+	quotes      bool // draws exercise text from cached quotes instead of random words
 }
 
 // indexOf finds val in opts, defaulting to 0 if it's not there -- e.g. a
@@ -81,6 +82,7 @@ func newMenuModel(profile *storage.Profile, db *sql.DB) menuModel {
 		punctuation: settings.Punctuation,
 		zenMode:     settings.ZenMode,
 		focusWeak:   settings.FocusWeak,
+		quotes:      settings.Quotes,
 	}
 	if settings.Mode == "words" {
 		m.mode = modeWords
@@ -98,6 +100,7 @@ func (m menuModel) saveSettings() {
 		Punctuation: m.punctuation,
 		ZenMode:     m.zenMode,
 		FocusWeak:   m.focusWeak,
+		Quotes:      m.quotes,
 	})
 }
 
@@ -146,17 +149,28 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		punctuation := m.punctuation
 		zenMode := m.zenMode
 		focusWeak := m.focusWeak
+		quotes := m.quotes
 		return m, func() tea.Msg {
-			return startTypingMsg{mode: mode, target: target, punctuation: punctuation, zenMode: zenMode, focusWeak: focusWeak}
+			return startTypingMsg{mode: mode, target: target, punctuation: punctuation, zenMode: zenMode, focusWeak: focusWeak, quotes: quotes}
 		}
 	case "c":
-		m.punctuation = !m.punctuation
-		m.saveSettings()
+		if !m.quotes { // punctuation is implied whenever quotes mode is on
+			m.punctuation = !m.punctuation
+			m.saveSettings()
+		}
 	case "z":
 		m.zenMode = !m.zenMode
 		m.saveSettings()
 	case "f":
-		m.focusWeak = !m.focusWeak
+		if !m.quotes { // weak-key biasing has no meaning over fixed quote text
+			m.focusWeak = !m.focusWeak
+			m.saveSettings()
+		}
+	case "s":
+		m.quotes = !m.quotes
+		if m.quotes {
+			m.punctuation = true
+		}
 		m.saveSettings()
 	case "p":
 		return m, func() tea.Msg { return viewProfileMsg{} }
@@ -215,19 +229,29 @@ func (m menuModel) View() string {
 		)
 	}
 
+	sourceStr := "Random words"
+	if m.quotes {
+		sourceStr = "Quotes"
+	}
+	sourceLine := fmt.Sprintf("Source: %s (s)", boldStyle.Render(sourceStr))
+
 	punctStr, zenStr, focusStr := "Off", "Off", "Off"
-	if m.punctuation {
+	if m.punctuation || m.quotes {
 		punctStr = "On"
 	}
 	if m.zenMode {
 		zenStr = "On"
 	}
-	if m.focusWeak {
+	focusHint := " (f)"
+	if m.quotes {
+		focusStr = "N/A"
+		focusHint = ""
+	} else if m.focusWeak {
 		focusStr = "On"
 	}
 	togglesLine := fmt.Sprintf(
-		"Punctuation: %s (c)   Zen mode: %s (z)   Focus weak keys: %s (f)",
-		boldStyle.Render(punctStr), boldStyle.Render(zenStr), boldStyle.Render(focusStr),
+		"Punctuation: %s (c)   Zen mode: %s (z)   Focus weak keys: %s%s",
+		boldStyle.Render(punctStr), boldStyle.Render(zenStr), boldStyle.Render(focusStr), focusHint,
 	)
 
 	help := helpStyle.Render("enter: start   p: profile   u: switch profile   q: quit")
@@ -236,7 +260,7 @@ func (m menuModel) View() string {
 		lipgloss.Left,
 		title, profileLine, streakLine, challengeLine, "",
 		modeLine, targetLine, pbLine, "",
-		togglesLine, "",
+		sourceLine, togglesLine, "",
 		help,
 	)
 }

@@ -149,6 +149,11 @@ func migrate(db *sql.DB) error {
 			claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (profile_id, day)
 		);
+		CREATE TABLE IF NOT EXISTS quotes_cache (
+			id     INTEGER PRIMARY KEY,
+			quote  TEXT NOT NULL,
+			author TEXT NOT NULL
+		);
 	`)
 	if err != nil {
 		return err
@@ -166,6 +171,9 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := addColumnIfMissing(db, "settings", "focus_weak", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "settings", "quotes", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := addColumnIfMissing(db, "test_history", "punctuation", "INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -318,6 +326,7 @@ type Settings struct {
 	Punctuation bool
 	ZenMode     bool // disables HP loss/KO for a pure-practice experience
 	FocusWeak   bool // biases word choice toward the player's weakest characters
+	Quotes      bool // draws exercise text from cached quotes instead of random words
 }
 
 func defaultSettings() Settings {
@@ -327,11 +336,11 @@ func defaultSettings() Settings {
 // LoadSettings returns profileID's saved settings, or sensible defaults if
 // none have been saved yet.
 func LoadSettings(db *sql.DB, profileID int64) (Settings, error) {
-	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak FROM settings WHERE profile_id = ?`, profileID)
+	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes FROM settings WHERE profile_id = ?`, profileID)
 
 	var s Settings
-	var punctuation, zenMode, focusWeak int
-	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak)
+	var punctuation, zenMode, focusWeak, quotes int
+	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultSettings(), nil
 	}
@@ -341,6 +350,7 @@ func LoadSettings(db *sql.DB, profileID int64) (Settings, error) {
 	s.Punctuation = punctuation != 0
 	s.ZenMode = zenMode != 0
 	s.FocusWeak = focusWeak != 0
+	s.Quotes = quotes != 0
 	return s, nil
 }
 
@@ -354,16 +364,17 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 		return 0
 	}
 	_, err := db.Exec(`
-		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
 			mode        = excluded.mode,
 			duration    = excluded.duration,
 			word_count  = excluded.word_count,
 			punctuation = excluded.punctuation,
 			zen_mode    = excluded.zen_mode,
-			focus_weak  = excluded.focus_weak
-	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak))
+			focus_weak  = excluded.focus_weak,
+			quotes      = excluded.quotes
+	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak), toInt(s.Quotes))
 	return err
 }
 
@@ -671,6 +682,58 @@ func HasClaimedDailyChallenge(db *sql.DB, profileID int64, day string) (bool, er
 func ClaimDailyChallenge(db *sql.DB, profileID int64, day string, when time.Time) error {
 	_, err := db.Exec(`INSERT OR IGNORE INTO daily_challenge_claims (profile_id, day, claimed_at) VALUES (?, ?, ?)`, profileID, day, when)
 	return err
+}
+
+// CachedQuote is one quote cached locally from the quotes API -- shared
+// across all profiles rather than scoped to one, since the quote text
+// itself has nothing to do with any particular player.
+type CachedQuote struct {
+	ID     int
+	Text   string
+	Author string
+}
+
+// CachedQuotes returns every quote currently cached.
+func CachedQuotes(db *sql.DB) ([]CachedQuote, error) {
+	rows, err := db.Query(`SELECT id, quote, author FROM quotes_cache`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []CachedQuote
+	for rows.Next() {
+		var q CachedQuote
+		if err := rows.Scan(&q.ID, &q.Text, &q.Author); err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	return out, rows.Err()
+}
+
+// StoreQuotes adds qs to the cache, skipping any whose id is already
+// present (a later fetch can legitimately return quotes we've already
+// cached from an earlier one).
+func StoreQuotes(db *sql.DB, qs []CachedQuote) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO quotes_cache (id, quote, author) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, q := range qs {
+		if _, err := stmt.Exec(q.ID, q.Text, q.Author); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // PeriodSummary aggregates a profile's activity over a date range.
