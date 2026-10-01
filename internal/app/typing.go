@@ -358,9 +358,15 @@ func (m *typingModel) completeWord() {
 		m.bestCombo = max(m.bestCombo, m.successCombo)
 		m.xpBonus += game.StreakBonus(m.successCombo)
 		if m.successCombo%game.GreenWordStreakInterval == 0 {
-			// Mark the word about to become current -- not this one,
-			// which is already done.
-			m.greenWordIdx = m.wordIndex + 1
+			// +2, not +1: m.wordIndex is about to become wordIndex+1 (the
+			// next word), so marking that one green would make it
+			// current the instant it's assigned -- with zero frames
+			// where it's still "upcoming," the green tint would never
+			// actually be reachable in the render switch below (the
+			// current-word case is checked first). Marking the word
+			// *after* next instead gives it one real word's worth of
+			// lead time to be seen coming, same as a golden word.
+			m.greenWordIdx = m.wordIndex + 2
 		}
 	}
 	m.wordHasMistake = false
