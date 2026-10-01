@@ -10,7 +10,7 @@ import "sort"
 // Progress bundles the stats achievements are evaluated against.
 type Progress struct {
 	Level          int
-	TotalExercises int // successes + KOs
+	TotalExercises int // successful (non-KO) exercises completed -- a knockout doesn't count as "complete"
 	BestWordStreak int
 	KOCount        int
 	DailyStreak    int

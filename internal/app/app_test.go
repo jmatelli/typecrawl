@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jmatelli/typecrawl/internal/achievements"
 	"github.com/jmatelli/typecrawl/internal/stats"
 	"github.com/jmatelli/typecrawl/internal/storage"
 )
@@ -315,6 +316,39 @@ func TestKOedRunDoesNotSetANewWordStreakRecord(t *testing.T) {
 	m2 := next.(Model)
 	if m2.profile.BestWordStreak != 5 {
 		t.Fatalf("expected BestWordStreak unchanged by a KO'd run, got %d", m2.profile.BestWordStreak)
+	}
+}
+
+// TestKOedFirstExerciseDoesNotUnlockFirstSteps is a regression test for a
+// reported bug: a brand-new profile's very first exercise ending in a KO
+// must NOT unlock "First Steps" (or any "Complete X exercises" achievement)
+// -- getting knocked out isn't completing the exercise, and KOs already
+// have their own dedicated achievement line (ko_1/ko_5/ko_10).
+func TestKOedFirstExerciseDoesNotUnlockFirstSteps(t *testing.T) {
+	m, _ := newTestApp(t)
+	next, _ := m.update(finishTypingMsg{
+		result: stats.Result{WPM: 30, Accuracy: 50, KeystrokeCV: 0.4, KeystrokeSamples: 50},
+		mode:   modeTime, target: 30, ko: true, hp: 0, maxHP: 100, bestCombo: 2,
+	})
+	m2 := next.(Model)
+
+	// The achievement-unlock screen legitimately still shows -- this same
+	// KO unlocks "Down But Not Out" (ko_1). What must NOT happen is
+	// "First Steps" unlocking alongside it.
+	progress := buildAchievementProgress(m.db, m2.profile, 0, 0)
+	if progress.TotalExercises != 0 {
+		t.Fatalf("expected TotalExercises=0 after a KO (SuccessCount still 0), got %d", progress.TotalExercises)
+	}
+	byID := make(map[string]bool)
+	for _, a := range achievements.All {
+		byID[a.ID] = a.Unlocked(progress)
+	}
+	if byID["first_exercise"] {
+		t.Fatal("expected 'First Steps' to remain locked after a KO'd first exercise")
+	}
+	// It SHOULD still unlock the KO-specific track, though.
+	if !byID["ko_1"] {
+		t.Fatal("expected 'Down But Not Out' (ko_1) to unlock from this same KO")
 	}
 }
 
