@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: typecrawl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: .
+    binary: typecrawl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+nfpms:
+  - id: typecrawl
+    package_name: typecrawl
+    vendor: Joël Matelli
+    homepage: https://github.com/jmatelli/typecrawl
+    maintainer: Joël Matelli <jo.matelli@gmail.com>
+    description: A terminal typing test with RPG-style progression (XP, achievements, HP/combo mechanics).
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+brews:
+  - name: typecrawl
+    repository:
+      owner: jmatelli
+      name: homebrew-typecrawl
+    homepage: https://github.com/jmatelli/typecrawl
+    description: A terminal typing test with RPG-style progression (XP, achievements, HP/combo mechanics).
+    license: MIT
+    install: |
+      bin.install "typecrawl"
+    test: |
+      system "#{bin}/typecrawl", "--list-profiles"
+
+release:
+  footer: >-
+
+    ---
+
+    Install via Homebrew: `brew install jmatelli/typecrawl/typecrawl`
+
+    Install via apt (Debian/Ubuntu): download the `.deb` below and run `sudo dpkg -i <file>`
