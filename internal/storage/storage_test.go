@@ -750,6 +750,27 @@ func TestPunctuationAndZenRunCounts(t *testing.T) {
 	}
 }
 
+// TestPunctuationRunCountExcludesQuotesMode verifies PunctuationRunCount
+// only counts random-words runs: a quotes-mode run also has punctuation = 1
+// (it's forced on), but it has its own dedicated achievement line, so it
+// must not also feed Grammarian's -- otherwise one run would count toward
+// two different achievement tracks.
+func TestPunctuationRunCountExcludesQuotesMode(t *testing.T) {
+	db, p := newTestDB(t)
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, true, false, "random", 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, true, false, "quotes", 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, true, false, "quotes", 40, 30*time.Second, time.Now())
+
+	punct, _ := PunctuationRunCount(db, p.ID)
+	quotes, _ := QuoteRunCount(db, p.ID)
+	if punct != 1 {
+		t.Fatalf("expected PunctuationRunCount to count only the random-mode run, got %d", punct)
+	}
+	if quotes != 2 {
+		t.Fatalf("expected QuoteRunCount to count both quotes-mode runs, got %d", quotes)
+	}
+}
+
 func TestTotalWordsTypedIncludesKOs(t *testing.T) {
 	db, p := newTestDB(t)
 	RecordTestResult(db, p.ID, 50, 90, "words", 100, false, false, false, "random", 100, 60*time.Second, time.Now())
