@@ -456,21 +456,41 @@ func TestShieldForgivesExactlyOneMistakeThenExpires(t *testing.T) {
 	}
 }
 
-func TestGreenWordAppearsAfterStreakIntervalAndHealsOnCleanCompletion(t *testing.T) {
-	wordList := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}
+// greenWordTestWordList returns n identical one-character words, enough
+// for the green-word tests below regardless of exact streak arithmetic.
+func greenWordTestWordList(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "w"
+	}
+	return out
+}
+
+func TestGreenWordAppearsTwoWordsAheadAndHealsOnCleanCompletion(t *testing.T) {
+	wordList := greenWordTestWordList(20)
 	m := newTestTypingModel(modeWords, wordList, 100)
 	m.hp = 50 // leave room to observe the heal
 
 	for i := 0; i < game.GreenWordStreakInterval; i++ {
-		m = typeString(m, wordList[i])
+		m = typeString(m, "w")
 		m = pressSpace(m)
 	}
-	if m.greenWordIdx != game.GreenWordStreakInterval {
-		t.Fatalf("expected the word right after a %d-streak marked green (index %d), got %d",
-			game.GreenWordStreakInterval, game.GreenWordStreakInterval, m.greenWordIdx)
+	// Reached the streak milestone at word index
+	// GreenWordStreakInterval-1 (the 10th word); the green word is marked
+	// two words ahead, not one -- see the comment at the assignment site
+	// for why one word of normal "upcoming" lead time matters.
+	wantGreenIdx := game.GreenWordStreakInterval + 1
+	if m.greenWordIdx != wantGreenIdx {
+		t.Fatalf("expected the green word marked at index %d, got %d", wantGreenIdx, m.greenWordIdx)
 	}
 
-	m = typeString(m, wordList[game.GreenWordStreakInterval])
+	m = typeString(m, "w") // the intervening normal word -- no effect
+	m = pressSpace(m)
+	if m.hp != 50 {
+		t.Fatalf("expected the intervening word to have no effect on hp, got %d", m.hp)
+	}
+
+	m = typeString(m, "w") // lands the actual green word
 	m = pressSpace(m)
 	if m.hp != 50+game.GreenWordHealAmount {
 		t.Fatalf("expected hp=%d after healing, got %d", 50+game.GreenWordHealAmount, m.hp)
@@ -480,15 +500,45 @@ func TestGreenWordAppearsAfterStreakIntervalAndHealsOnCleanCompletion(t *testing
 	}
 }
 
+func TestGreenWordIsVisibleAsUpcomingBeforeBecomingCurrent(t *testing.T) {
+	// Regression test: the green word must render with its special color
+	// for at least one frame while it's still upcoming (idx > wordIndex),
+	// not only become reachable once it's already the current word (where
+	// the current-word render case would always shadow it).
+	wordList := greenWordTestWordList(20)
+	m := newTestTypingModel(modeWords, wordList, 100)
+
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.greenWordIdx <= m.wordIndex {
+		t.Fatalf("expected the green word (index %d) to still be ahead of the current word (index %d)", m.greenWordIdx, m.wordIndex)
+	}
+	view := m.View()
+	if !containsSubstring(view, "w") {
+		t.Fatal("expected the word list rendered at all")
+	}
+	// The actual color check: render the word list directly and confirm
+	// the greenWordStyle-rendered word appears literally in the output.
+	wantRendered := greenWordStyle.Render(wordList[m.greenWordIdx])
+	if !strings.Contains(view, wantRendered) {
+		t.Fatalf("expected the upcoming green word rendered in greenWordStyle, got:\n%s", view)
+	}
+}
+
 func TestGreenWordMissedGrantsNoHeal(t *testing.T) {
-	wordList := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}
+	wordList := greenWordTestWordList(20)
 	m := newTestTypingModel(modeWords, wordList, 100)
 	m.hp = 50
 
 	for i := 0; i < game.GreenWordStreakInterval; i++ {
-		m = typeString(m, wordList[i])
+		m = typeString(m, "w")
 		m = pressSpace(m)
 	}
+	m = typeString(m, "w") // intervening normal word
+	m = pressSpace(m)
+
 	hpBeforeGreenWord := m.hp
 	m = typeString(m, "Z") // one mistake on the green word (matches its length)
 	m = pressSpace(m)
@@ -503,15 +553,17 @@ func TestGreenWordMissedGrantsNoHeal(t *testing.T) {
 }
 
 func TestGreenWordHealCapsAtMaxHP(t *testing.T) {
-	wordList := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}
+	wordList := greenWordTestWordList(20)
 	m := newTestTypingModel(modeWords, wordList, 100)
 	m.hp = 100 // already full
 
 	for i := 0; i < game.GreenWordStreakInterval; i++ {
-		m = typeString(m, wordList[i])
+		m = typeString(m, "w")
 		m = pressSpace(m)
 	}
-	m = typeString(m, wordList[game.GreenWordStreakInterval])
+	m = typeString(m, "w") // intervening normal word
+	m = pressSpace(m)
+	m = typeString(m, "w") // the green word
 	m = pressSpace(m)
 	if m.hp != 100 {
 		t.Fatalf("expected hp capped at maxHP=100, got %d", m.hp)
@@ -521,31 +573,31 @@ func TestGreenWordHealCapsAtMaxHP(t *testing.T) {
 func TestGreenWordCanRetriggerOnLaterStreakMilestones(t *testing.T) {
 	// A long, unbroken streak should offer a new green word at every
 	// multiple of the interval, not just the first time.
-	n := game.GreenWordStreakInterval*2 + 1
-	wordList := make([]string, n)
-	for i := range wordList {
-		wordList[i] = "w"
-	}
+	wordList := greenWordTestWordList(game.GreenWordStreakInterval*3 + 10)
 	m := newTestTypingModel(modeWords, wordList, 100)
 	m.hp = 10
 
-	for i := 0; i < game.GreenWordStreakInterval; i++ {
-		m = typeString(m, "w")
-		m = pressSpace(m)
+	typeClean := func(count int) {
+		for i := 0; i < count; i++ {
+			m = typeString(m, "w")
+			m = pressSpace(m)
+		}
 	}
-	m = typeString(m, "w") // lands the first green word
-	m = pressSpace(m)
-	afterFirstHeal := m.hp
 
-	for i := 0; i < game.GreenWordStreakInterval-1; i++ {
-		m = typeString(m, "w")
-		m = pressSpace(m)
+	typeClean(game.GreenWordStreakInterval) // reach the first milestone (streak=10)
+	typeClean(1)                            // the intervening normal word
+	typeClean(1)                            // lands the first green word
+	afterFirstHeal := m.hp
+	if afterFirstHeal <= 10 {
+		t.Fatalf("expected the first heal to raise hp above the starting 10, got %d", afterFirstHeal)
 	}
+
+	typeClean(game.GreenWordStreakInterval - 2) // reach the second milestone (streak=20)
 	if m.greenWordIdx == -1 {
 		t.Fatal("expected a second green word opportunity at the next streak milestone")
 	}
-	m = typeString(m, "w")
-	m = pressSpace(m)
+	typeClean(1) // the intervening normal word
+	typeClean(1) // lands the second green word
 	if m.hp <= afterFirstHeal {
 		t.Fatalf("expected a second heal to raise hp again, had %d, now %d", afterFirstHeal, m.hp)
 	}
