@@ -32,6 +32,11 @@ func findProfileByName(profiles []*storage.Profile, name string) *storage.Profil
 	return nil
 }
 
+// version is overridden at release build time via
+// -ldflags "-X main.version={{.Version}}" (see .goreleaser.yaml). A plain
+// `go build`/`go run`/`go install` without that keeps the "dev" default.
+var version = "dev"
+
 func main() {
 	profileFlag := flag.String("profile", "", "quick-launch: profile name to select (skips profile selection)")
 	timeFlag := flag.Int("time", 0, "quick-launch: start a time-based test immediately, in seconds (requires --profile)")
@@ -41,7 +46,15 @@ func main() {
 	focusWeakFlag := flag.Bool("focus-weak", false, "quick-launch: bias word choice toward your weakest keys (requires --time or --words)")
 	listProfilesFlag := flag.Bool("list-profiles", false, "list saved profiles and exit")
 	exportFlag := flag.String("export", "", "export a profile's stats to this JSON file path and exit (requires --profile)")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&showVersion, "v", false, "print version and exit (shorthand)")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Println("typecrawl " + version)
+		return
+	}
 
 	if *timeFlag != 0 && *wordsFlag != 0 {
 		fmt.Fprintln(os.Stderr, "error: specify only one of --time or --words")
