@@ -8,6 +8,7 @@ type startTypingMsg struct {
 	punctuation bool
 	zenMode     bool
 	focusWeak   bool
+	quotes      bool
 }
 
 type finishTypingMsg struct {

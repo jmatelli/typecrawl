@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jmatelli/typecrawl/internal/game"
+	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/stats"
 	"github.com/jmatelli/typecrawl/internal/words"
 )
@@ -72,6 +73,14 @@ type typingModel struct {
 	focusWeak   bool         // whether word choice is biased toward weak characters
 	weakChars   map[rune]int // profile's known weak characters, for biasing word choice
 
+	// quotesMode draws exercise text from quotePool (real quotations)
+	// instead of internal/words' random word lists -- see genWords. It has
+	// no interaction with focusWeak (weak-key biasing has no meaning over
+	// fixed quote text) and always implies punctuation, since a quote's own
+	// punctuation is part of the text, not an optional flourish.
+	quotesMode bool
+	quotePool  []quotes.Quote
+
 	// ghostPaceMS is the personal best's per-word cumulative elapsed
 	// milliseconds for this exact mode/target, if one exists -- raced live
 	// against via ghostStatus. nil means no PB to race yet.
@@ -109,19 +118,21 @@ type typingModel struct {
 	shieldActive  bool
 }
 
-func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation, zenMode, focusWeak bool, weakChars map[rune]int, ghostPaceMS []int, ghostWPMSeries []float64) typingModel {
+func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation, zenMode, focusWeak, quotesMode bool, quotePool []quotes.Quote, weakChars map[rune]int, ghostPaceMS []int, ghostWPMSeries []float64) typingModel {
+	// A quote's punctuation is part of its text, not an optional flourish
+	// layered on top the way words.Punctuate dresses up random words -- so
+	// quotes mode always counts as a punctuation-enabled run (this is what
+	// feeds the "Grammarian" achievement and the punctuation daily
+	// challenge, among other things).
+	punctuation = punctuation || quotesMode
+
 	n := target
 	if mode == modeTime {
 		n = 300
 	}
-	wordList := words.ForLevelWeak(n, level, weakChars)
-	if punctuation {
-		wordList = words.Punctuate(wordList)
-	}
-	return typingModel{
+	m := typingModel{
 		mode:           mode,
 		target:         target,
-		wordList:       wordList,
 		typedWords:     make([]string, 0, n),
 		tracker:        stats.NewTracker(),
 		width:          width,
@@ -129,14 +140,36 @@ func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation,
 		punctuation:    punctuation,
 		zenMode:        zenMode,
 		focusWeak:      focusWeak,
+		quotesMode:     quotesMode,
+		quotePool:      quotePool,
 		weakChars:      weakChars,
 		ghostPaceMS:    ghostPaceMS,
 		ghostWPMSeries: ghostWPMSeries,
 		hp:             maxHP,
 		maxHP:          maxHP,
-		goldenWordIdx:  rollGoldenWordIndex(len(wordList)),
 		greenWordIdx:   -1,
 	}
+	m.wordList = m.genWords(n)
+	m.goldenWordIdx = rollGoldenWordIndex(len(m.wordList))
+	return m
+}
+
+// genWords produces n more exercise words, either from quotePool (whole
+// quotes concatenated end to end) or from internal/words' tiered random
+// lists (optionally dressed up with sentence-style punctuation), depending
+// on quotesMode. tail, when given, is the end of the already-generated word
+// list -- see words.ForLevel -- and is only meaningful for the random-words
+// path; quotes carry their own punctuation and have no equivalent
+// immediate-repeat concern worth tracking across calls (see quotes.Words).
+func (m typingModel) genWords(n int, tail ...string) []string {
+	if m.quotesMode {
+		return quotes.Words(m.quotePool, n)
+	}
+	list := words.ForLevelWeak(n, m.level, m.weakChars, tail...)
+	if m.punctuation {
+		list = words.Punctuate(list)
+	}
+	return list
 }
 
 // rollGoldenWordIndex decides whether this exercise gets a rare golden
@@ -408,11 +441,7 @@ func (m *typingModel) ensureWords() {
 	}
 	const lookahead = 60
 	if len(m.wordList)-m.wordIndex < lookahead {
-		next := words.ForLevelWeak(lookahead, m.level, m.weakChars, m.wordList...)
-		if m.punctuation {
-			next = words.Punctuate(next)
-		}
-		m.wordList = append(m.wordList, next...)
+		m.wordList = append(m.wordList, m.genWords(lookahead, m.wordList...)...)
 	}
 }
 

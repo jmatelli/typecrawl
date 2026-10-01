@@ -15,6 +15,7 @@ import (
 
 	"github.com/jmatelli/typecrawl/internal/challenge"
 	"github.com/jmatelli/typecrawl/internal/game"
+	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/storage"
 )
 
@@ -106,6 +107,7 @@ type LaunchOptions struct {
 	Punctuation bool
 	ZenMode     bool
 	FocusWeak   bool
+	Quotes      bool // draws exercise text from cached quotes instead of random words
 }
 
 // findProfileByName looks up a profile case-insensitively, since CLI flags
@@ -154,6 +156,7 @@ func NewWithOptions(db *sql.DB, profiles []*storage.Profile, opts LaunchOptions)
 	m.pendingAutoStart = &startTypingMsg{
 		mode: mode, target: opts.Target,
 		punctuation: opts.Punctuation, zenMode: opts.ZenMode, focusWeak: opts.FocusWeak,
+		quotes: opts.Quotes,
 	}
 	return m, nil
 }
@@ -223,9 +226,13 @@ func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 		ghostPaceMS = pb.GhostPace         // best-effort; nil just means no ghost to race
 		ghostWPMSeries = pb.GhostWPMSeries // best-effort; nil just means no ghost curve to overlay on the results graph
 	}
+	var quotePool []quotes.Quote
+	if msg.quotes {
+		quotePool = loadQuotePool(m.db)
+	}
 	m.typing = newTypingModel(
 		msg.mode, msg.target, m.width, game.MaxHP(m.profile.Level), m.profile.Level,
-		msg.punctuation, msg.zenMode, msg.focusWeak, weakChars, ghostPaceMS, ghostWPMSeries,
+		msg.punctuation, msg.zenMode, msg.focusWeak, msg.quotes, quotePool, weakChars, ghostPaceMS, ghostWPMSeries,
 	)
 	m.state = stateTyping
 	return m, m.typing.Init()

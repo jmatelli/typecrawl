@@ -154,6 +154,57 @@ func TestPAndUNavigateToProfileAndSwitch(t *testing.T) {
 	}
 }
 
+func press(t *testing.T, m menuModel, key rune) menuModel {
+	t.Helper()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{key}})
+	return next.(menuModel)
+}
+
+func TestSToggleTurnsOnQuotesAndForcesPunctuationOn(t *testing.T) {
+	m := newTestMenuModel(t)
+	if m.quotes {
+		t.Fatal("expected quotes off by default")
+	}
+	m = press(t, m, 's')
+	if !m.quotes {
+		t.Fatal("expected 's' to turn quotes on")
+	}
+	if !m.punctuation {
+		t.Fatal("expected turning quotes on to force punctuation on")
+	}
+	settings, _ := storage.LoadSettings(m.db, m.profile.ID)
+	if !settings.Quotes || !settings.Punctuation {
+		t.Fatal("expected quotes and punctuation persisted to settings")
+	}
+}
+
+func TestCAndFAreNoOpsWhileQuotesIsOn(t *testing.T) {
+	m := newTestMenuModel(t)
+	m = press(t, m, 's') // quotes on, punctuation forced on
+	m = press(t, m, 'c') // should be ignored: punctuation stays on, not toggled off
+	if !m.punctuation {
+		t.Fatal("expected 'c' to be a no-op while quotes is on")
+	}
+	before := m.focusWeak
+	m = press(t, m, 'f')
+	if m.focusWeak != before {
+		t.Fatal("expected 'f' to be a no-op while quotes is on")
+	}
+}
+
+func TestEnterCarriesQuotesIntoStartTypingMsg(t *testing.T) {
+	m := newTestMenuModel(t)
+	m = press(t, m, 's')
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	msg, ok := cmd().(startTypingMsg)
+	if !ok {
+		t.Fatalf("expected startTypingMsg, got %T", msg)
+	}
+	if !msg.quotes {
+		t.Fatal("expected quotes=true carried into startTypingMsg")
+	}
+}
+
 func TestMenuViewShowsDailyChallengeStatus(t *testing.T) {
 	m := newTestMenuModel(t)
 	view := m.View()

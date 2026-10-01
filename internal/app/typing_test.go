@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jmatelli/typecrawl/internal/game"
+	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/stats"
 )
 
@@ -47,7 +48,7 @@ func pressBackspace(m typingModel) typingModel {
 }
 
 func TestNewTypingModelInitializesHPAndWordList(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 150, 1, false, false, false, nil, nil, nil)
+	m := newTypingModel(modeTime, 30, 80, 150, 1, false, false, false, false, nil, nil, nil, nil)
 	if m.hp != 150 || m.maxHP != 150 {
 		t.Fatalf("expected hp=maxHP=150, got hp=%d maxHP=%d", m.hp, m.maxHP)
 	}
@@ -275,19 +276,19 @@ func TestTimeModeFinishesWhenElapsedReachesTarget(t *testing.T) {
 }
 
 func TestGhostStatusInactiveBeforeStartOrWithoutGhostData(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, nil, nil, nil)
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, nil, nil)
 	if _, active := m.ghostStatus(); active {
 		t.Fatal("expected inactive with no ghost pace at all")
 	}
 
-	m2 := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, nil, []int{500, 1000}, nil)
+	m2 := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, []int{500, 1000}, nil)
 	if _, active := m2.ghostStatus(); active {
 		t.Fatal("expected inactive before the run has started (wordIndex still 0)")
 	}
 }
 
 func TestGhostStatusComputesAheadAndBehind(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, nil, []int{1000, 2000, 3000}, nil)
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, []int{1000, 2000, 3000}, nil)
 	m.started = true
 	m.wordIndex = 1
 
@@ -316,7 +317,7 @@ func TestGhostStatusComputesAheadAndBehind(t *testing.T) {
 }
 
 func TestFinishCarriesGhostWPMSeriesThrough(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, nil, nil, []float64{40, 55, 60})
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, nil, []float64{40, 55, 60})
 	m.started = true
 	m.tracker.Start = time.Now().Add(-time.Second)
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // not finish; just confirm field is set on the model
@@ -621,5 +622,55 @@ func TestViewShowsShieldActiveIndicator(t *testing.T) {
 	m.shieldActive = true
 	if !containsSubstring(m.View(), "shield active") {
 		t.Fatal("expected a shield indicator once active")
+	}
+}
+
+var testQuotePool = []quotes.Quote{
+	{ID: 1, Text: "Alpha beta gamma delta epsilon."},
+	{ID: 2, Text: "Zeta eta theta iota kappa."},
+}
+
+func TestNewTypingModelQuotesModeDrawsFromQuotePool(t *testing.T) {
+	m := newTypingModel(modeWords, 6, 80, 100, 1, false, false, false, true, testQuotePool, nil, nil, nil)
+	if len(m.wordList) != 6 {
+		t.Fatalf("expected exactly 6 words, got %d: %v", len(m.wordList), m.wordList)
+	}
+	poolWords := make(map[string]bool)
+	for _, q := range testQuotePool {
+		for _, qw := range strings.Fields(q.Text) {
+			poolWords[strings.TrimRight(qw, ".")] = true
+		}
+	}
+	for _, w := range m.wordList {
+		if !poolWords[strings.TrimRight(w, ".")] {
+			t.Errorf("word %q in the generated list doesn't come from testQuotePool", w)
+		}
+	}
+}
+
+func TestNewTypingModelQuotesModeForcesPunctuationOn(t *testing.T) {
+	m := newTypingModel(modeWords, 10, 80, 100, 1, false, false, false, true, testQuotePool, nil, nil, nil)
+	if !m.punctuation {
+		t.Fatal("expected quotes mode to force punctuation on")
+	}
+}
+
+func TestNewTypingModelRandomModeDoesNotUseQuotePool(t *testing.T) {
+	m := newTypingModel(modeWords, 50, 80, 100, 1, false, false, false, false, testQuotePool, nil, nil, nil)
+	distinctiveQuoteWords := map[string]bool{"alpha": true, "zeta": true, "kappa": true, "theta": true}
+	for _, w := range m.wordList {
+		if distinctiveQuoteWords[strings.ToLower(w)] {
+			t.Fatalf("expected no quote-sourced words when quotesMode is false, found %q from testQuotePool", w)
+		}
+	}
+}
+
+func TestEnsureWordsTimeModeTopsUpFromQuotePoolWhenQuotesMode(t *testing.T) {
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, true, testQuotePool, nil, nil, nil)
+	initialLen := len(m.wordList)
+	m.wordIndex = initialLen - 1 // within ensureWords' lookahead threshold
+	m.ensureWords()
+	if len(m.wordList) <= initialLen {
+		t.Fatalf("expected ensureWords to top up the quote-sourced word list, stayed at %d", initialLen)
 	}
 }
