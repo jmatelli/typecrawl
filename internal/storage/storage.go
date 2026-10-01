@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -31,10 +32,38 @@ type Profile struct {
 	EquippedTitle string
 }
 
+// userDataDir returns the OS's conventional base directory for per-user
+// application data. On Linux this follows the XDG Base Directory spec's
+// data directory ($XDG_DATA_HOME, or ~/.local/share) rather than
+// os.UserConfigDir's ~/.config -- this is a database of real user data
+// (profiles, stats, history), not settings, so the data directory is the
+// semantically correct one. macOS and Windows don't draw that distinction
+// the same way, so os.UserConfigDir's platform default (~/Library/Application
+// Support, %AppData%) already serves both roles there.
+func userDataDir() (string, error) {
+	return userDataDirFor(runtime.GOOS)
+}
+
+// userDataDirFor is userDataDir's logic parameterized on GOOS, so it's
+// exercisable in tests regardless of which platform they run on.
+func userDataDirFor(goos string) (string, error) {
+	if goos == "linux" {
+		if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
+			return dir, nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, ".local", "share"), nil
+	}
+	return os.UserConfigDir()
+}
+
 // DefaultPath returns the on-disk location of the Typecrawl database,
 // creating its parent directory if necessary.
 func DefaultPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := userDataDir()
 	if err != nil {
 		return "", err
 	}
