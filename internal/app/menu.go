@@ -30,6 +30,17 @@ func modeString(m testMode) string {
 	return "time"
 }
 
+// sourceString converts the quotes-mode toggle to the string form persisted
+// in the DB (personal bests, test history) -- "random" and "quotes" are
+// tracked as separate personal bests at the same mode/target, since typing
+// fixed quote text is a meaningfully different challenge from random words.
+func sourceString(quotes bool) string {
+	if quotes {
+		return "quotes"
+	}
+	return "random"
+}
+
 var (
 	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	helpStyle    = lipgloss.NewStyle().Faint(true)
@@ -167,10 +178,13 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveSettings()
 		}
 	case "s":
+		// m.punctuation itself is deliberately left untouched here -- it's
+		// the player's own preference, independent of quotes mode. Display
+		// and launch behavior already treat punctuation as on whenever
+		// quotes is on (see the View below and newTypingModel), so forcing
+		// it into m.punctuation too would just leave it stuck "on" after
+		// quotes mode is switched back off again.
 		m.quotes = !m.quotes
-		if m.quotes {
-			m.punctuation = true
-		}
 		m.saveSettings()
 	case "p":
 		return m, func() tea.Msg { return viewProfileMsg{} }
@@ -221,7 +235,7 @@ func (m menuModel) View() string {
 	}
 
 	pbLine := "Your best: " + dimStyle.Render("no record yet for this mode/duration")
-	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(m.mode), m.currentTarget()); err == nil && pb != nil {
+	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(m.mode), m.currentTarget(), sourceString(m.quotes)); err == nil && pb != nil {
 		pbLine = fmt.Sprintf("Your best: %s WPM (%s accuracy, %s)",
 			boldStyle.Render(fmt.Sprintf("%.1f", pb.WPM)),
 			boldStyle.Render(fmt.Sprintf("%.0f%%", pb.Accuracy)),

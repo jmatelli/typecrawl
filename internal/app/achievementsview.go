@@ -111,6 +111,7 @@ func buildAchievementProgress(db *sql.DB, profile *storage.Profile, dailyStreak 
 	hadPerfectComeback, _ := storage.HasPerfectComebackAfterKO(db, profile.ID)
 	punctuationRunCount, _ := storage.PunctuationRunCount(db, profile.ID)
 	zenRunCount, _ := storage.ZenRunCount(db, profile.ID)
+	quoteRunCount, _ := storage.QuoteRunCount(db, profile.ID)
 	totalWordsTyped, _ := storage.TotalWordsTyped(db, profile.ID)
 	totalPlayTime, _ := storage.TotalPlayTime(db, profile.ID)
 
@@ -141,6 +142,7 @@ func buildAchievementProgress(db *sql.DB, profile *storage.Profile, dailyStreak 
 		HadPerfectComeback:     hadPerfectComeback,
 		PunctuationRunCount:    punctuationRunCount,
 		ZenRunCount:            zenRunCount,
+		QuoteRunCount:          quoteRunCount,
 		TotalWordsTyped:        totalWordsTyped,
 		TotalPlaySeconds:       int(totalPlayTime.Seconds()),
 	}

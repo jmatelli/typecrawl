@@ -117,11 +117,12 @@ func migrate(db *sql.DB) error {
 			profile_id  INTEGER NOT NULL REFERENCES profiles(id),
 			mode        TEXT NOT NULL,
 			target      INTEGER NOT NULL,
+			source      TEXT NOT NULL DEFAULT 'random',
 			best_wpm    REAL NOT NULL,
 			accuracy    REAL NOT NULL,
 			achieved_at DATETIME NOT NULL,
 			ghost_pace  TEXT NOT NULL DEFAULT '',
-			PRIMARY KEY (profile_id, mode, target)
+			PRIMARY KEY (profile_id, mode, target, source)
 		);
 		CREATE TABLE IF NOT EXISTS char_mistakes (
 			profile_id INTEGER NOT NULL REFERENCES profiles(id),
@@ -194,7 +195,89 @@ func migrate(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "personal_bests", "ghost_wpm_series", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := addColumnIfMissing(db, "test_history", "source", "TEXT NOT NULL DEFAULT 'random'"); err != nil {
+		return err
+	}
+	if err := migratePersonalBestsSource(db); err != nil {
+		return err
+	}
 	return addColumnIfMissing(db, "profiles", "equipped_title", "TEXT NOT NULL DEFAULT ''")
+}
+
+// migratePersonalBestsSource adds the source column to a personal_bests
+// table created before quotes mode existed, where every row is implicitly a
+// random-words PB. The column alone isn't enough here, unlike every other
+// addColumnIfMissing use in this file: source is also part of the primary
+// key (a quotes run and a random-words run at the same mode/target must be
+// two separate PB rows, not one overwriting the other), and SQLite can't
+// ALTER a PRIMARY KEY in place -- so an already-existing table has to be
+// rebuilt under the new key instead. Gated on the column's absence, so this
+// runs at most once per database.
+func migratePersonalBestsSource(db *sql.DB) error {
+	hasSource, err := columnExists(db, "personal_bests", "source")
+	if err != nil || hasSource {
+		return err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		CREATE TABLE personal_bests_new (
+			profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+			mode        TEXT NOT NULL,
+			target      INTEGER NOT NULL,
+			source      TEXT NOT NULL DEFAULT 'random',
+			best_wpm    REAL NOT NULL,
+			accuracy    REAL NOT NULL,
+			achieved_at DATETIME NOT NULL,
+			ghost_pace  TEXT NOT NULL DEFAULT '',
+			ghost_wpm_series TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (profile_id, mode, target, source)
+		)
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO personal_bests_new (profile_id, mode, target, source, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series)
+		SELECT profile_id, mode, target, 'random', best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series FROM personal_bests
+	`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE personal_bests`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE personal_bests_new RENAME TO personal_bests`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// columnExists reports whether table has the given column, used where a
+// plain addColumnIfMissing isn't enough (see migratePersonalBestsSource).
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // addColumnIfMissing runs an ALTER TABLE ADD COLUMN for databases created
@@ -381,8 +464,13 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 // PersonalBest is a profile's best recorded WPM for one test configuration
 // (mode + target).
 type PersonalBest struct {
-	Mode       string
-	Target     int
+	Mode   string
+	Target int
+	// Source is "random" or "quotes" -- a quotes run and a random-words run
+	// at the same mode/target are tracked as separate personal bests, since
+	// typing fixed quote text is a meaningfully different challenge from
+	// random words.
+	Source     string
 	WPM        float64
 	Accuracy   float64
 	AchievedAt time.Time
@@ -457,17 +545,17 @@ func parseFloats(s string) []float64 {
 	return out
 }
 
-// GetPersonalBest returns profileID's best WPM for the given mode/target,
-// or nil if none has been recorded yet.
-func GetPersonalBest(db *sql.DB, profileID int64, mode string, target int) (*PersonalBest, error) {
+// GetPersonalBest returns profileID's best WPM for the given mode/target/
+// source, or nil if none has been recorded yet.
+func GetPersonalBest(db *sql.DB, profileID int64, mode string, target int, source string) (*PersonalBest, error) {
 	row := db.QueryRow(`
-		SELECT mode, target, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series
-		FROM personal_bests WHERE profile_id = ? AND mode = ? AND target = ?
-	`, profileID, mode, target)
+		SELECT mode, target, source, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series
+		FROM personal_bests WHERE profile_id = ? AND mode = ? AND target = ? AND source = ?
+	`, profileID, mode, target, source)
 
 	var pb PersonalBest
 	var ghostPace, ghostWPMSeries string
-	if err := row.Scan(&pb.Mode, &pb.Target, &pb.WPM, &pb.Accuracy, &pb.AchievedAt, &ghostPace, &ghostWPMSeries); err != nil {
+	if err := row.Scan(&pb.Mode, &pb.Target, &pb.Source, &pb.WPM, &pb.Accuracy, &pb.AchievedAt, &ghostPace, &ghostWPMSeries); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -478,12 +566,12 @@ func GetPersonalBest(db *sql.DB, profileID int64, mode string, target int) (*Per
 	return &pb, nil
 }
 
-// RecordPersonalBest updates profileID's best WPM for mode/target if wpm
-// beats the existing record (or none exists yet), returning whether it
+// RecordPersonalBest updates profileID's best WPM for mode/target/source if
+// wpm beats the existing record (or none exists yet), returning whether it
 // did. ghostPaceMS and ghostWPMSeries are the new run's per-word pacing and
 // WPM curve, stored as the new ghost to race and compare against next time.
-func RecordPersonalBest(db *sql.DB, profileID int64, mode string, target int, wpm, accuracy float64, ghostPaceMS []int, ghostWPMSeries []float64, when time.Time) (bool, error) {
-	existing, err := GetPersonalBest(db, profileID, mode, target)
+func RecordPersonalBest(db *sql.DB, profileID int64, mode string, target int, source string, wpm, accuracy float64, ghostPaceMS []int, ghostWPMSeries []float64, when time.Time) (bool, error) {
+	existing, err := GetPersonalBest(db, profileID, mode, target, source)
 	if err != nil {
 		return false, err
 	}
@@ -491,15 +579,15 @@ func RecordPersonalBest(db *sql.DB, profileID int64, mode string, target int, wp
 		return false, nil
 	}
 	_, err = db.Exec(`
-		INSERT INTO personal_bests (profile_id, mode, target, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(profile_id, mode, target) DO UPDATE SET
+		INSERT INTO personal_bests (profile_id, mode, target, source, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(profile_id, mode, target, source) DO UPDATE SET
 			best_wpm         = excluded.best_wpm,
 			accuracy         = excluded.accuracy,
 			achieved_at      = excluded.achieved_at,
 			ghost_pace       = excluded.ghost_pace,
 			ghost_wpm_series = excluded.ghost_wpm_series
-	`, profileID, mode, target, wpm, accuracy, when, serializeGhostPace(ghostPaceMS), serializeFloats(ghostWPMSeries))
+	`, profileID, mode, target, source, wpm, accuracy, when, serializeGhostPace(ghostPaceMS), serializeFloats(ghostWPMSeries))
 	if err != nil {
 		return false, err
 	}
@@ -507,11 +595,11 @@ func RecordPersonalBest(db *sql.DB, profileID int64, mode string, target int, wp
 }
 
 // ListPersonalBests returns every personal best profileID has recorded,
-// ordered by mode then target.
+// ordered by mode, then source, then target.
 func ListPersonalBests(db *sql.DB, profileID int64) ([]PersonalBest, error) {
 	rows, err := db.Query(`
-		SELECT mode, target, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series
-		FROM personal_bests WHERE profile_id = ? ORDER BY mode, target
+		SELECT mode, target, source, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series
+		FROM personal_bests WHERE profile_id = ? ORDER BY mode, source, target
 	`, profileID)
 	if err != nil {
 		return nil, err
@@ -522,7 +610,7 @@ func ListPersonalBests(db *sql.DB, profileID int64) ([]PersonalBest, error) {
 	for rows.Next() {
 		var pb PersonalBest
 		var ghostPace, ghostWPMSeries string
-		if err := rows.Scan(&pb.Mode, &pb.Target, &pb.WPM, &pb.Accuracy, &pb.AchievedAt, &ghostPace, &ghostWPMSeries); err != nil {
+		if err := rows.Scan(&pb.Mode, &pb.Target, &pb.Source, &pb.WPM, &pb.Accuracy, &pb.AchievedAt, &ghostPace, &ghostWPMSeries); err != nil {
 			return nil, err
 		}
 		pb.GhostPace = parseGhostPace(ghostPace)
@@ -533,16 +621,17 @@ func ListPersonalBests(db *sql.DB, profileID int64) ([]PersonalBest, error) {
 }
 
 // BestOverallWPM returns profileID's single highest personal best across
-// every test configuration, or nil if none has been recorded yet.
+// every test configuration and source, or nil if none has been recorded
+// yet.
 func BestOverallWPM(db *sql.DB, profileID int64) (*PersonalBest, error) {
 	row := db.QueryRow(`
-		SELECT mode, target, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series
+		SELECT mode, target, source, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series
 		FROM personal_bests WHERE profile_id = ? ORDER BY best_wpm DESC LIMIT 1
 	`, profileID)
 
 	var pb PersonalBest
 	var ghostPace, ghostWPMSeries string
-	if err := row.Scan(&pb.Mode, &pb.Target, &pb.WPM, &pb.Accuracy, &pb.AchievedAt, &ghostPace, &ghostWPMSeries); err != nil {
+	if err := row.Scan(&pb.Mode, &pb.Target, &pb.Source, &pb.WPM, &pb.Accuracy, &pb.AchievedAt, &ghostPace, &ghostWPMSeries); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -631,7 +720,7 @@ func TopWeakChars(db *sql.DB, profileID int64, limit int) ([]rune, error) {
 
 // RecordTestResult appends one completed exercise to profileID's history,
 // used to chart WPM trend over time and to evaluate achievements.
-func RecordTestResult(db *sql.DB, profileID int64, wpm, accuracy float64, mode string, target int, ko, punctuation, zenMode bool, wordsTyped int, duration time.Duration, when time.Time) error {
+func RecordTestResult(db *sql.DB, profileID int64, wpm, accuracy float64, mode string, target int, ko, punctuation, zenMode bool, source string, wordsTyped int, duration time.Duration, when time.Time) error {
 	toInt := func(b bool) int {
 		if b {
 			return 1
@@ -639,9 +728,9 @@ func RecordTestResult(db *sql.DB, profileID int64, wpm, accuracy float64, mode s
 		return 0
 	}
 	_, err := db.Exec(`
-		INSERT INTO test_history (profile_id, wpm, accuracy, mode, target, ko, punctuation, zen_mode, words_typed, duration_seconds, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, profileID, wpm, accuracy, mode, target, toInt(ko), toInt(punctuation), toInt(zenMode), wordsTyped, int(duration.Seconds()), when)
+		INSERT INTO test_history (profile_id, wpm, accuracy, mode, target, ko, punctuation, zen_mode, source, words_typed, duration_seconds, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, profileID, wpm, accuracy, mode, target, toInt(ko), toInt(punctuation), toInt(zenMode), source, wordsTyped, int(duration.Seconds()), when)
 	return err
 }
 
@@ -1019,6 +1108,14 @@ func PunctuationRunCount(db *sql.DB, profileID int64) (int, error) {
 func ZenRunCount(db *sql.DB, profileID int64) (int, error) {
 	var n int
 	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND zen_mode = 1`, profileID).Scan(&n)
+	return n, err
+}
+
+// QuoteRunCount returns how many exercises profileID has completed in
+// quotes mode.
+func QuoteRunCount(db *sql.DB, profileID int64) (int, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND source = 'quotes'`, profileID).Scan(&n)
 	return n, err
 }
 

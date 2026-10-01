@@ -379,7 +379,7 @@ func TestPersonalBestIsRecordedOnImprovement(t *testing.T) {
 	if !m2.results.extra.isNewPB {
 		t.Fatal("expected this run to be a new PB")
 	}
-	pb, err := storage.GetPersonalBest(m.db, profile.ID, "time", 30)
+	pb, err := storage.GetPersonalBest(m.db, profile.ID, "time", 30, "random")
 	if err != nil || pb == nil {
 		t.Fatalf("expected a stored PB, err=%v", err)
 	}
@@ -393,7 +393,7 @@ func TestPersonalBestIsRecordedOnImprovement(t *testing.T) {
 
 func TestStartTypingLoadsGhostFromExistingPersonalBest(t *testing.T) {
 	m, profile := newTestApp(t)
-	storage.RecordPersonalBest(m.db, profile.ID, "time", 30, 70, 96, []int{400, 900, 1500}, []float64{60, 65, 70}, time.Now())
+	storage.RecordPersonalBest(m.db, profile.ID, "time", 30, "random", 70, 96, []int{400, 900, 1500}, []float64{60, 65, 70}, time.Now())
 
 	next, _ := m.startTyping(startTypingMsg{mode: modeTime, target: 30})
 	if len(next.typing.ghostPaceMS) != 3 || next.typing.ghostPaceMS[2] != 1500 {

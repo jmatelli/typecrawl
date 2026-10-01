@@ -24,6 +24,7 @@ type finishTypingMsg struct {
 	hitCount     int          // how many mistakes actually dealt (or would deal) HP damage
 	punctuation  bool         // whether punctuation was enabled this run
 	zenMode      bool         // whether zen mode was enabled this run
+	quotes       bool         // whether this run used quotes mode instead of random words
 	wordsTyped   int          // how many words were completed this run
 
 	// ghostWPMSeries is the personal best's WPM curve this run was raced

@@ -31,6 +31,7 @@ type Progress struct {
 	HadPerfectComeback     bool // scored 100% accuracy on the exercise right after a knockout
 	PunctuationRunCount    int  // exercises completed with punctuation enabled
 	ZenRunCount            int  // exercises completed in zen mode
+	QuoteRunCount          int  // exercises completed in quotes mode
 	TotalWordsTyped        int  // lifetime words typed across all exercises
 	TotalPlaySeconds       int  // lifetime exercise duration, across all exercises
 }
@@ -281,6 +282,9 @@ var All = []Achievement{
 	{ID: "zen_garden", Name: "Zen Garden", Description: "Complete 25 exercises in zen mode", Tier: Silver,
 		check:    func(p Progress) bool { return p.ZenRunCount >= 25 },
 		progress: numericProgress(func(p Progress) float64 { return float64(p.ZenRunCount) }, 25)},
+	{ID: "bookworm", Name: "Bookworm", Description: "Complete 25 exercises in quotes mode", Tier: Silver,
+		check:    func(p Progress) bool { return p.QuoteRunCount >= 25 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.QuoteRunCount) }, 25)},
 }
 
 // LockedProgress pairs a still-locked achievement with how close it is to

@@ -471,6 +471,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 	charMistakes := m.charMistakes
 	hitCount := m.hitCount
 	punctuation, zenMode := m.punctuation, m.zenMode
+	quotesMode := m.quotesMode
 	wordsTyped := len(m.typedWords)
 	ghostWPMSeries := m.ghostWPMSeries
 	return m, func() tea.Msg {
@@ -479,7 +480,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 			xpBonus: xpBonus, bestCombo: bestCombo,
 			mode: mode, target: target, charMistakes: charMistakes,
 			hitCount:    hitCount,
-			punctuation: punctuation, zenMode: zenMode, wordsTyped: wordsTyped,
+			punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, wordsTyped: wordsTyped,
 			ghostWPMSeries: ghostWPMSeries,
 		}
 	}
