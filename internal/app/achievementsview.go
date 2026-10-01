@@ -204,14 +204,26 @@ func (m achievementsViewModel) View() string {
 		boldStyle.Render(fmt.Sprintf("%d/%d", achievements.UnlockedCount(m.progress), len(achievements.All))),
 	)
 
+	// Padded to the longest name so Description starts at the same column
+	// on every line, the same way tierLabel below pads to the longest tier
+	// name -- computed rather than hardcoded since, unlike the fixed set of
+	// tiers, the achievement list keeps growing.
+	maxNameLen := 0
+	for _, a := range achievements.All {
+		if len(a.Name) > maxNameLen {
+			maxNameLen = len(a.Name)
+		}
+	}
+
 	var lines []string
 	for _, a := range achievements.All {
 		tierLabel := fmt.Sprintf("%-11s", a.Tier.String()) // width of "Grandmaster", the longest tier name
+		nameLabel := fmt.Sprintf("%-*s", maxNameLen, a.Name)
 		if a.Unlocked(m.progress) {
 			badge := tierStyle(a.Tier).Render(tierLabel)
-			lines = append(lines, fmt.Sprintf("[x] %s %s  %s", badge, boldStyle.Render(a.Name), a.Description))
+			lines = append(lines, fmt.Sprintf("[x] %s %s  %s", badge, boldStyle.Render(nameLabel), a.Description))
 		} else {
-			lines = append(lines, dimStyle.Render(fmt.Sprintf("[ ] %s %s  %s", tierLabel, a.Name, a.Description)))
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("[ ] %s %s  %s", tierLabel, nameLabel, a.Description)))
 		}
 	}
 
