@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -11,6 +12,11 @@ import (
 	"github.com/jmatelli/typecrawl/internal/avatar"
 	"github.com/jmatelli/typecrawl/internal/storage"
 )
+
+// maxNameLength caps how long a profile name can be -- generous for any
+// real name, but enough to stop a huge pasted block of text from becoming
+// one.
+const maxNameLength = 40
 
 // revealMinDuration is how long the avatar reveal ignores input for. The
 // screen is dismissed by "any key", and Enter both submits the name and is
@@ -75,12 +81,26 @@ func (m profileModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.revealAt = time.Now()
 		return m, nil
 	case tea.KeyBackspace:
-		if len(m.name) > 0 {
-			m.name = m.name[:len(m.name)-1]
+		// Trim by rune, not by byte -- a byte-level trim on a multi-byte
+		// rune (accents, CJK, emoji) would leave a dangling continuation
+		// byte in m.name, corrupting it as invalid UTF-8.
+		if runes := []rune(m.name); len(runes) > 0 {
+			m.name = string(runes[:len(runes)-1])
 		}
 	case tea.KeyRunes:
 		m.errMsg = ""
-		m.name += string(keyMsg.Runes)
+		// Reject control characters (this is how a pasted or otherwise
+		// smuggled-in raw ANSI/OSC escape sequence would arrive) so a
+		// profile name can never inject terminal escape codes into
+		// anything that later renders it verbatim.
+		for _, r := range keyMsg.Runes {
+			if len([]rune(m.name)) >= maxNameLength {
+				break
+			}
+			if !unicode.IsControl(r) {
+				m.name += string(r)
+			}
+		}
 	}
 	return m, nil
 }
