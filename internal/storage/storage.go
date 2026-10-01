@@ -1095,11 +1095,15 @@ func HasPerfectComebackAfterKO(db *sql.DB, profileID int64) (bool, error) {
 	return perfect, err
 }
 
-// PunctuationRunCount returns how many exercises profileID has completed
-// with punctuation enabled.
+// PunctuationRunCount returns how many random-words exercises profileID has
+// completed with punctuation enabled. Scoped to source = 'random' -- a
+// quotes-mode run also has punctuation = 1 (it's forced on, see
+// newTypingModel), but it already has its own dedicated achievement line
+// (QuoteRunCount/"Bookworm"), so counting it here too would double-count
+// the same run under two different achievements.
 func PunctuationRunCount(db *sql.DB, profileID int64) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND punctuation = 1`, profileID).Scan(&n)
+	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND punctuation = 1 AND source = 'random'`, profileID).Scan(&n)
 	return n, err
 }
 

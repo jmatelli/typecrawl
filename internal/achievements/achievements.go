@@ -276,15 +276,53 @@ var All = []Achievement{
 		check: func(p Progress) bool { return p.PracticedAllWeekdays }},
 	{ID: "daily_grind", Name: "Daily Grind", Description: "Complete 10 exercises in a single day", Tier: Silver,
 		check: func(p Progress) bool { return p.HadBigDay }},
-	{ID: "grammarian", Name: "Grammarian", Description: "Complete 25 exercises with punctuation enabled", Tier: Silver,
-		check:    func(p Progress) bool { return p.PunctuationRunCount >= 25 },
-		progress: numericProgress(func(p Progress) float64 { return float64(p.PunctuationRunCount) }, 25)},
 	{ID: "zen_garden", Name: "Zen Garden", Description: "Complete 25 exercises in zen mode", Tier: Silver,
 		check:    func(p Progress) bool { return p.ZenRunCount >= 25 },
 		progress: numericProgress(func(p Progress) float64 { return float64(p.ZenRunCount) }, 25)},
-	{ID: "bookworm", Name: "Bookworm", Description: "Complete 25 exercises in quotes mode", Tier: Silver,
+
+	// Punctuation runs, in random (non-quotes) mode specifically -- a
+	// quotes run also has punctuation enabled (it's forced on), but that's
+	// already covered by its own line below, so this one is scoped to
+	// source = 'random' (see PunctuationRunCount) to avoid double-counting
+	// the same run under two different achievements.
+	{ID: "grammarian_5", Name: "Grammarian", Description: "Complete 5 exercises with punctuation enabled", Tier: Bronze,
+		check:    func(p Progress) bool { return p.PunctuationRunCount >= 5 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.PunctuationRunCount) }, 5)},
+	{ID: "grammarian_25", Name: "Punctilious", Description: "Complete 25 exercises with punctuation enabled", Tier: Silver,
+		check:    func(p Progress) bool { return p.PunctuationRunCount >= 25 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.PunctuationRunCount) }, 25)},
+	{ID: "grammarian_50", Name: "Stickler", Description: "Complete 50 exercises with punctuation enabled", Tier: Gold,
+		check:    func(p Progress) bool { return p.PunctuationRunCount >= 50 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.PunctuationRunCount) }, 50)},
+	{ID: "grammarian_100", Name: "Pedant", Description: "Complete 100 exercises with punctuation enabled", Tier: Diamond,
+		check:    func(p Progress) bool { return p.PunctuationRunCount >= 100 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.PunctuationRunCount) }, 100)},
+	{ID: "grammarian_250", Name: "Linguist", Description: "Complete 250 exercises with punctuation enabled", Tier: Master,
+		check:    func(p Progress) bool { return p.PunctuationRunCount >= 250 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.PunctuationRunCount) }, 250)},
+	{ID: "grammarian_500", Name: "Grammar Sage", Description: "Complete 500 exercises with punctuation enabled", Tier: Grandmaster,
+		check:    func(p Progress) bool { return p.PunctuationRunCount >= 500 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.PunctuationRunCount) }, 500)},
+
+	// Quotes mode runs.
+	{ID: "bookworm_5", Name: "Bookworm", Description: "Complete 5 exercises in quotes mode", Tier: Bronze,
+		check:    func(p Progress) bool { return p.QuoteRunCount >= 5 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.QuoteRunCount) }, 5)},
+	{ID: "bookworm_25", Name: "Avid Reader", Description: "Complete 25 exercises in quotes mode", Tier: Silver,
 		check:    func(p Progress) bool { return p.QuoteRunCount >= 25 },
 		progress: numericProgress(func(p Progress) float64 { return float64(p.QuoteRunCount) }, 25)},
+	{ID: "bookworm_50", Name: "Bibliophile", Description: "Complete 50 exercises in quotes mode", Tier: Gold,
+		check:    func(p Progress) bool { return p.QuoteRunCount >= 50 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.QuoteRunCount) }, 50)},
+	{ID: "bookworm_100", Name: "Well-Read", Description: "Complete 100 exercises in quotes mode", Tier: Diamond,
+		check:    func(p Progress) bool { return p.QuoteRunCount >= 100 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.QuoteRunCount) }, 100)},
+	{ID: "bookworm_250", Name: "Literary Scholar", Description: "Complete 250 exercises in quotes mode", Tier: Master,
+		check:    func(p Progress) bool { return p.QuoteRunCount >= 250 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.QuoteRunCount) }, 250)},
+	{ID: "bookworm_500", Name: "Living Library", Description: "Complete 500 exercises in quotes mode", Tier: Grandmaster,
+		check:    func(p Progress) bool { return p.QuoteRunCount >= 500 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.QuoteRunCount) }, 500)},
 }
 
 // LockedProgress pairs a still-locked achievement with how close it is to
