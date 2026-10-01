@@ -32,8 +32,8 @@ func TestHistoryViewRendersEntriesNewestFirst(t *testing.T) {
 	defer db.Close()
 	profile, _ := storage.CreateProfile(db, "tester")
 	now := time.Now()
-	storage.RecordTestResult(db, profile.ID, 65.5, 97.2, "time", 30, false, false, false, 40, 30*time.Second, now)
-	storage.RecordTestResult(db, profile.ID, 40, 80, "words", 50, true, false, false, 20, 25*time.Second, now.Add(time.Minute))
+	storage.RecordTestResult(db, profile.ID, 65.5, 97.2, "time", 30, false, false, false, "random", 40, 30*time.Second, now)
+	storage.RecordTestResult(db, profile.ID, 40, 80, "words", 50, true, false, false, "random", 20, 25*time.Second, now.Add(time.Minute))
 
 	m := newHistoryViewModel(profile, db)
 	if len(m.entries) != 2 {

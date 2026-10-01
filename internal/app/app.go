@@ -222,7 +222,7 @@ func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 	}
 	var ghostPaceMS []int
 	var ghostWPMSeries []float64
-	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(msg.mode), msg.target); err == nil && pb != nil {
+	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(msg.mode), msg.target, sourceString(msg.quotes)); err == nil && pb != nil {
 		ghostPaceMS = pb.GhostPace         // best-effort; nil just means no ghost to race
 		ghostWPMSeries = pb.GhostWPMSeries // best-effort; nil just means no ghost curve to overlay on the results graph
 	}
@@ -340,6 +340,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		now := time.Now()
 		modeStr := modeString(msg.mode)
+		sourceStr := sourceString(msg.quotes)
 
 		// Snapshot "before" state for the achievement-unlock diff below,
 		// ahead of any mutation this run causes.
@@ -353,16 +354,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		_ = storage.RecordActivity(m.db, m.profile.ID, now) // best-effort; shows up on the profile's activity graph
 		_ = storage.RecordCharMistakes(m.db, m.profile.ID, msg.charMistakes)
-		_ = storage.RecordTestResult(m.db, m.profile.ID, msg.result.WPM, msg.result.Accuracy, modeStr, msg.target, msg.ko, msg.punctuation, msg.zenMode, msg.wordsTyped, msg.result.Duration, now)
+		_ = storage.RecordTestResult(m.db, m.profile.ID, msg.result.WPM, msg.result.Accuracy, modeStr, msg.target, msg.ko, msg.punctuation, msg.zenMode, sourceStr, msg.wordsTyped, msg.result.Duration, now)
 		streakDays, _ := storage.CurrentStreak(m.db, m.profile.ID, now)
 
 		var isNewPB bool
 		personalBest := beforeBestWPM
 		if !msg.ko {
 			var err error
-			isNewPB, err = storage.RecordPersonalBest(m.db, m.profile.ID, modeStr, msg.target, msg.result.WPM, msg.result.Accuracy, msg.result.WordEndOffsetsMS, msg.result.WPMSeries, now)
+			isNewPB, err = storage.RecordPersonalBest(m.db, m.profile.ID, modeStr, msg.target, sourceStr, msg.result.WPM, msg.result.Accuracy, msg.result.WordEndOffsetsMS, msg.result.WPMSeries, now)
 			if err == nil {
-				if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeStr, msg.target); err == nil && pb != nil {
+				if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeStr, msg.target, sourceStr); err == nil && pb != nil {
 					personalBest = pb.WPM
 				}
 			}

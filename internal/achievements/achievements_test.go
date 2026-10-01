@@ -155,6 +155,7 @@ func TestUnlockedCountAllForMaxedProgress(t *testing.T) {
 		CompletedLongHaul: true, CompletedSprint: true, PracticedLateNight: true, PracticedEarlyMorning: true,
 		HasBestInBothModes: true, PracticedAllWeekdays: true, HadBigDay: true, CompletedUltraLongHaul: true,
 		ComebackCount: 1_000_000, HadPerfectComeback: true, PunctuationRunCount: 1_000_000, ZenRunCount: 1_000_000,
+		QuoteRunCount:   1_000_000,
 		TotalWordsTyped: 1_000_000_000, TotalPlaySeconds: 1_000_000_000,
 	}
 	if got := UnlockedCount(maxed); got != len(All) {

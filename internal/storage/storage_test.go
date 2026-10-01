@@ -112,7 +112,7 @@ func TestResetProfileKeepsNameAndAllTimeRecordsButClearsProgress(t *testing.T) {
 	Save(db, p)
 	SetEquippedTitle(db, p.ID, "level_10")
 	RecordActivity(db, p.ID, time.Now())
-	RecordPersonalBest(db, p.ID, "time", 30, 80, 95, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "time", 30, "random", 80, 95, nil, nil, time.Now())
 
 	reset, err := ResetProfile(db, p.ID)
 	if err != nil {
@@ -130,7 +130,7 @@ func TestResetProfileKeepsNameAndAllTimeRecordsButClearsProgress(t *testing.T) {
 	if reset.EquippedTitle != "" {
 		t.Fatalf("expected equipped title cleared on reset, got %q", reset.EquippedTitle)
 	}
-	pb, _ := GetPersonalBest(db, p.ID, "time", 30)
+	pb, _ := GetPersonalBest(db, p.ID, "time", 30, "random")
 	if pb != nil {
 		t.Fatal("expected personal bests cleared on reset")
 	}
@@ -258,25 +258,25 @@ func TestCurrentStreakIsZeroWithNoActivityAtAll(t *testing.T) {
 
 func TestRecordPersonalBestOnlyUpdatesOnImprovement(t *testing.T) {
 	db, p := newTestDB(t)
-	isNew, err := RecordPersonalBest(db, p.ID, "time", 30, 50, 90, []int{500, 1000}, []float64{40, 55}, time.Now())
+	isNew, err := RecordPersonalBest(db, p.ID, "time", 30, "random", 50, 90, []int{500, 1000}, []float64{40, 55}, time.Now())
 	if err != nil || !isNew {
 		t.Fatalf("expected first PB to be new, err=%v isNew=%v", err, isNew)
 	}
 
-	isNew, err = RecordPersonalBest(db, p.ID, "time", 30, 40, 99, []int{1}, []float64{1}, time.Now())
+	isNew, err = RecordPersonalBest(db, p.ID, "time", 30, "random", 40, 99, []int{1}, []float64{1}, time.Now())
 	if err != nil || isNew {
 		t.Fatalf("expected a slower run to NOT be a new PB, err=%v isNew=%v", err, isNew)
 	}
-	pb, _ := GetPersonalBest(db, p.ID, "time", 30)
+	pb, _ := GetPersonalBest(db, p.ID, "time", 30, "random")
 	if pb.WPM != 50 {
 		t.Fatalf("expected PB to remain 50 WPM after a non-improving run, got %v", pb.WPM)
 	}
 
-	isNew, err = RecordPersonalBest(db, p.ID, "time", 30, 70, 95, []int{300, 700}, []float64{60, 70}, time.Now())
+	isNew, err = RecordPersonalBest(db, p.ID, "time", 30, "random", 70, 95, []int{300, 700}, []float64{60, 70}, time.Now())
 	if err != nil || !isNew {
 		t.Fatalf("expected a faster run to be a new PB, err=%v isNew=%v", err, isNew)
 	}
-	pb, _ = GetPersonalBest(db, p.ID, "time", 30)
+	pb, _ = GetPersonalBest(db, p.ID, "time", 30, "random")
 	if pb.WPM != 70 {
 		t.Fatalf("expected updated PB of 70 WPM, got %v", pb.WPM)
 	}
@@ -288,9 +288,102 @@ func TestRecordPersonalBestOnlyUpdatesOnImprovement(t *testing.T) {
 	}
 }
 
+// TestPersonalBestsAreIndependentPerSource verifies the fix for quotes mode
+// and random-words sharing one PB slot at the same mode/target: a quotes
+// run is a meaningfully different challenge from random words, so each
+// source must track (and update) its own record independently.
+func TestPersonalBestsAreIndependentPerSource(t *testing.T) {
+	db, p := newTestDB(t)
+	if _, err := RecordPersonalBest(db, p.ID, "time", 30, "random", 50, 90, nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordPersonalBest(db, p.ID, "time", 30, "quotes", 80, 95, nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	randomPB, _ := GetPersonalBest(db, p.ID, "time", 30, "random")
+	quotesPB, _ := GetPersonalBest(db, p.ID, "time", 30, "quotes")
+	if randomPB == nil || randomPB.WPM != 50 {
+		t.Fatalf("expected the random-words PB to remain 50 WPM, unaffected by the quotes PB, got %+v", randomPB)
+	}
+	if quotesPB == nil || quotesPB.WPM != 80 {
+		t.Fatalf("expected a separate 80 WPM quotes PB, got %+v", quotesPB)
+	}
+
+	// A new, better random-words run must only ever update the random
+	// record, never the quotes one.
+	isNew, err := RecordPersonalBest(db, p.ID, "time", 30, "random", 60, 92, nil, nil, time.Now())
+	if err != nil || !isNew {
+		t.Fatalf("expected the faster random-words run to be a new PB, err=%v isNew=%v", err, isNew)
+	}
+	quotesPB, _ = GetPersonalBest(db, p.ID, "time", 30, "quotes")
+	if quotesPB.WPM != 80 {
+		t.Fatalf("expected the quotes PB to be untouched by a random-words update, got %+v", quotesPB)
+	}
+
+	bests, err := ListPersonalBests(db, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bests) != 2 {
+		t.Fatalf("expected 2 personal bests (one per source) at the same mode/target, got %d: %+v", len(bests), bests)
+	}
+}
+
+// TestMigratePersonalBestsSourceAddsDefaultSourceToExistingRows simulates a
+// database created before quotes mode existed (personal_bests with the old
+// 3-column primary key and no source column) and verifies migrate() rebuilds
+// it correctly, defaulting every pre-existing row to "random" -- those runs
+// really were all random-words runs, since quotes mode didn't exist yet.
+func TestMigratePersonalBestsSourceAddsDefaultSourceToExistingRows(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Hand-create the pre-quotes-mode schema this migration targets.
+	if _, err := db.Exec(`
+		CREATE TABLE profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+		CREATE TABLE personal_bests (
+			profile_id  INTEGER NOT NULL REFERENCES profiles(id),
+			mode        TEXT NOT NULL,
+			target      INTEGER NOT NULL,
+			best_wpm    REAL NOT NULL,
+			accuracy    REAL NOT NULL,
+			achieved_at DATETIME NOT NULL,
+			ghost_pace  TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (profile_id, mode, target)
+		);
+		INSERT INTO profiles (id, name) VALUES (1, 'tester');
+		INSERT INTO personal_bests (profile_id, mode, target, best_wpm, accuracy, achieved_at)
+		VALUES (1, 'time', 30, 55.5, 91, '2026-01-01 00:00:00');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	pb, err := GetPersonalBest(db, 1, "time", 30, "random")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb == nil || pb.WPM != 55.5 {
+		t.Fatalf("expected the pre-existing row preserved and defaulted to source=random, got %+v", pb)
+	}
+
+	// The new composite key must actually allow a second source at the
+	// same mode/target now -- the whole point of the migration.
+	if _, err := RecordPersonalBest(db, 1, "time", 30, "quotes", 70, 94, nil, nil, time.Now()); err != nil {
+		t.Fatalf("expected a quotes PB to coexist with the migrated random PB, got err=%v", err)
+	}
+}
+
 func TestGetPersonalBestReturnsNilWhenNoneRecorded(t *testing.T) {
 	db, p := newTestDB(t)
-	pb, err := GetPersonalBest(db, p.ID, "time", 30)
+	pb, err := GetPersonalBest(db, p.ID, "time", 30, "random")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,9 +394,9 @@ func TestGetPersonalBestReturnsNilWhenNoneRecorded(t *testing.T) {
 
 func TestBestOverallWPMPicksHighestAcrossConfigs(t *testing.T) {
 	db, p := newTestDB(t)
-	RecordPersonalBest(db, p.ID, "time", 30, 50, 90, nil, nil, time.Now())
-	RecordPersonalBest(db, p.ID, "words", 100, 80, 95, nil, nil, time.Now())
-	RecordPersonalBest(db, p.ID, "time", 60, 60, 92, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "time", 30, "random", 50, 90, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "words", 100, "random", 80, 95, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "time", 60, "random", 60, 92, nil, nil, time.Now())
 
 	best, err := BestOverallWPM(db, p.ID)
 	if err != nil {
@@ -316,9 +409,9 @@ func TestBestOverallWPMPicksHighestAcrossConfigs(t *testing.T) {
 
 func TestListPersonalBestsReturnsAllConfigsOrdered(t *testing.T) {
 	db, p := newTestDB(t)
-	RecordPersonalBest(db, p.ID, "words", 100, 80, 95, nil, nil, time.Now())
-	RecordPersonalBest(db, p.ID, "time", 30, 50, 90, nil, nil, time.Now())
-	RecordPersonalBest(db, p.ID, "time", 60, 60, 92, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "words", 100, "random", 80, 95, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "time", 30, "random", 50, 90, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "time", 60, "random", 60, 92, nil, nil, time.Now())
 
 	bests, err := ListPersonalBests(db, p.ID)
 	if err != nil {
@@ -342,12 +435,12 @@ func TestHasPersonalBestInBothModes(t *testing.T) {
 	if got {
 		t.Fatal("expected false before any PB")
 	}
-	RecordPersonalBest(db, p.ID, "time", 30, 50, 90, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "time", 30, "random", 50, 90, nil, nil, time.Now())
 	got, _ = HasPersonalBestInBothModes(db, p.ID)
 	if got {
 		t.Fatal("expected false with only one mode")
 	}
-	RecordPersonalBest(db, p.ID, "words", 100, 60, 92, nil, nil, time.Now())
+	RecordPersonalBest(db, p.ID, "words", 100, "random", 60, 92, nil, nil, time.Now())
 	got, _ = HasPersonalBestInBothModes(db, p.ID)
 	if !got {
 		t.Fatal("expected true once both modes have a PB")
@@ -366,8 +459,8 @@ func TestGhostPaceAndGhostWPMSeriesSerializationRoundTrip(t *testing.T) {
 	db, p := newTestDB(t)
 	for i, c := range cases {
 		target := 30 + i
-		RecordPersonalBest(db, p.ID, "time", target, float64(i+1), 90, c.pace, c.wpm, time.Now())
-		pb, err := GetPersonalBest(db, p.ID, "time", target)
+		RecordPersonalBest(db, p.ID, "time", target, "random", float64(i+1), 90, c.pace, c.wpm, time.Now())
+		pb, err := GetPersonalBest(db, p.ID, "time", target, "random")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,8 +540,8 @@ func TestWeakCharWeightsEmptyWithNoMistakes(t *testing.T) {
 func TestRecordTestResultAndListTestHistory(t *testing.T) {
 	db, p := newTestDB(t)
 	now := time.Now()
-	RecordTestResult(db, p.ID, 65.5, 97.2, "time", 30, false, true, false, 40, 30*time.Second, now)
-	RecordTestResult(db, p.ID, 40, 80, "words", 50, true, false, true, 20, 25*time.Second, now.Add(time.Minute))
+	RecordTestResult(db, p.ID, 65.5, 97.2, "time", 30, false, true, false, "random", 40, 30*time.Second, now)
+	RecordTestResult(db, p.ID, 40, 80, "words", 50, true, false, true, "random", 20, 25*time.Second, now.Add(time.Minute))
 
 	history, err := ListTestHistory(db, p.ID, 10)
 	if err != nil {
@@ -469,9 +562,9 @@ func TestRecordTestResultAndListTestHistory(t *testing.T) {
 func TestRecentWPMHistoryExcludesKOsAndOrdersOldestFirst(t *testing.T) {
 	db, p := newTestDB(t)
 	base := time.Now().Add(-time.Hour)
-	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 40, 30*time.Second, base)
-	RecordTestResult(db, p.ID, 50, 60, "time", 30, true, false, false, 10, 10*time.Second, base.Add(time.Minute))
-	RecordTestResult(db, p.ID, 55, 95, "time", 30, false, false, false, 42, 30*time.Second, base.Add(2*time.Minute))
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, base)
+	RecordTestResult(db, p.ID, 50, 60, "time", 30, true, false, false, "random", 10, 10*time.Second, base.Add(time.Minute))
+	RecordTestResult(db, p.ID, 55, 95, "time", 30, false, false, false, "random", 42, 30*time.Second, base.Add(2*time.Minute))
 
 	hist, err := RecentWPMHistory(db, p.ID, 30)
 	if err != nil {
@@ -485,9 +578,9 @@ func TestRecentWPMHistoryExcludesKOsAndOrdersOldestFirst(t *testing.T) {
 func TestRecentAccuracyHistoryExcludesKOsAndOrdersOldestFirst(t *testing.T) {
 	db, p := newTestDB(t)
 	base := time.Now().Add(-time.Hour)
-	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 40, 30*time.Second, base)
-	RecordTestResult(db, p.ID, 50, 60, "time", 30, true, false, false, 10, 10*time.Second, base.Add(time.Minute))
-	RecordTestResult(db, p.ID, 55, 95, "time", 30, false, false, false, 42, 30*time.Second, base.Add(2*time.Minute))
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, base)
+	RecordTestResult(db, p.ID, 50, 60, "time", 30, true, false, false, "random", 10, 10*time.Second, base.Add(time.Minute))
+	RecordTestResult(db, p.ID, 55, 95, "time", 30, false, false, false, "random", 42, 30*time.Second, base.Add(2*time.Minute))
 
 	hist, err := RecentAccuracyHistory(db, p.ID, 30)
 	if err != nil {
@@ -504,7 +597,7 @@ func TestHasPerfectAccuracyRun(t *testing.T) {
 	if got {
 		t.Fatal("expected false before any run")
 	}
-	RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
 	got, _ = HasPerfectAccuracyRun(db, p.ID)
 	if !got {
 		t.Fatal("expected true after a 100% accuracy run")
@@ -513,7 +606,7 @@ func TestHasPerfectAccuracyRun(t *testing.T) {
 
 func TestHasPerfectAccuracyRunIgnoresKOs(t *testing.T) {
 	db, p := newTestDB(t)
-	RecordTestResult(db, p.ID, 50, 100, "time", 30, true, false, false, 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 100, "time", 30, true, false, false, "random", 40, 30*time.Second, time.Now())
 	got, _ := HasPerfectAccuracyRun(db, p.ID)
 	if got {
 		t.Fatal("expected a KO'd 100%-accuracy run to not count")
@@ -522,7 +615,7 @@ func TestHasPerfectAccuracyRunIgnoresKOs(t *testing.T) {
 
 func TestHasCompletedTestConfigRequiresExactMatch(t *testing.T) {
 	db, p := newTestDB(t)
-	RecordTestResult(db, p.ID, 50, 90, "words", 200, false, false, false, 200, 60*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 90, "words", 200, false, false, false, "random", 200, 60*time.Second, time.Now())
 	got, _ := HasCompletedTestConfig(db, p.ID, "words", 200)
 	if !got {
 		t.Fatal("expected exact match to be found")
@@ -535,7 +628,7 @@ func TestHasCompletedTestConfigRequiresExactMatch(t *testing.T) {
 
 func TestHasCompletedWordsAtLeastIsOpenEnded(t *testing.T) {
 	db, p := newTestDB(t)
-	RecordTestResult(db, p.ID, 50, 90, "words", 600, false, false, false, 600, 90*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 90, "words", 600, false, false, false, "random", 600, 90*time.Second, time.Now())
 	got, _ := HasCompletedWordsAtLeast(db, p.ID, 500)
 	if !got {
 		t.Fatal("expected a 600-word run to satisfy a >=500 threshold")
@@ -549,7 +642,7 @@ func TestHasCompletedWordsAtLeastIsOpenEnded(t *testing.T) {
 func TestHasTestInHourRange(t *testing.T) {
 	db, p := newTestDB(t)
 	lateNight := time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)
-	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 40, 30*time.Second, lateNight)
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, lateNight)
 	got, _ := HasTestInHourRange(db, p.ID, 0, 4)
 	if !got {
 		t.Fatal("expected a 2am run to match the midnight-4am range")
@@ -563,13 +656,13 @@ func TestHasTestInHourRange(t *testing.T) {
 func TestPerfectRunCountExcludesKOs(t *testing.T) {
 	db, p := newTestDB(t)
 	for range 9 {
-		RecordTestResult(db, p.ID, 60, 100, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
+		RecordTestResult(db, p.ID, 60, 100, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
 	}
 	n, _ := PerfectRunCount(db, p.ID)
 	if n != 9 {
 		t.Fatalf("expected 9 perfect runs, got %d", n)
 	}
-	RecordTestResult(db, p.ID, 60, 100, "time", 30, true, false, false, 20, 15*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 60, 100, "time", 30, true, false, false, "random", 20, 15*time.Second, time.Now())
 	n, _ = PerfectRunCount(db, p.ID)
 	if n != 9 {
 		t.Fatalf("expected a KO'd 100%% run to not count, got %d", n)
@@ -583,21 +676,21 @@ func TestMaxPerfectAccuracyStreakTracksBreaksAndResets(t *testing.T) {
 		t.Fatalf("expected 0 with no history, got %d", n)
 	}
 
-	RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
-	RecordTestResult(db, p.ID, 55, 100, "time", 30, false, false, false, 42, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 55, 100, "time", 30, false, false, false, "random", 42, 30*time.Second, time.Now())
 	n, _ = MaxPerfectAccuracyStreak(db, p.ID)
 	if n != 2 {
 		t.Fatalf("expected a streak of 2, got %d", n)
 	}
 
-	RecordTestResult(db, p.ID, 50, 95, "time", 30, false, false, false, 38, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 95, "time", 30, false, false, false, "random", 38, 30*time.Second, time.Now())
 	n, _ = MaxPerfectAccuracyStreak(db, p.ID)
 	if n != 2 {
 		t.Fatalf("expected max still 2 after a break, got %d", n)
 	}
 
 	for range 3 {
-		RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
+		RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
 	}
 	n, _ = MaxPerfectAccuracyStreak(db, p.ID)
 	if n != 3 {
@@ -605,8 +698,8 @@ func TestMaxPerfectAccuracyStreakTracksBreaksAndResets(t *testing.T) {
 	}
 
 	// A KO at 100% accuracy must NOT extend the streak.
-	RecordTestResult(db, p.ID, 30, 100, "time", 30, true, false, false, 20, 20*time.Second, time.Now())
-	RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 30, 100, "time", 30, true, false, false, "random", 20, 20*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 100, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
 	n, _ = MaxPerfectAccuracyStreak(db, p.ID)
 	if n != 3 {
 		t.Fatalf("expected a KO to reset the streak (max stays 3), got %d", n)
@@ -621,8 +714,8 @@ func TestComebackCountAndPerfectComeback(t *testing.T) {
 	}
 
 	for range 4 {
-		RecordTestResult(db, p.ID, 40, 80, "time", 30, true, false, false, 15, 15*time.Second, time.Now())
-		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
+		RecordTestResult(db, p.ID, 40, 80, "time", 30, true, false, false, "random", 15, 15*time.Second, time.Now())
+		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
 	}
 	n, _ = ComebackCount(db, p.ID)
 	if n != 4 {
@@ -633,8 +726,8 @@ func TestComebackCountAndPerfectComeback(t *testing.T) {
 		t.Fatal("expected no perfect comeback yet")
 	}
 
-	RecordTestResult(db, p.ID, 40, 80, "time", 30, true, false, false, 15, 15*time.Second, time.Now())
-	RecordTestResult(db, p.ID, 55, 100, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 40, 80, "time", 30, true, false, false, "random", 15, 15*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 55, 100, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
 	n, _ = ComebackCount(db, p.ID)
 	perfect, _ = HasPerfectComebackAfterKO(db, p.ID)
 	if n != 5 || !perfect {
@@ -645,10 +738,10 @@ func TestComebackCountAndPerfectComeback(t *testing.T) {
 func TestPunctuationAndZenRunCounts(t *testing.T) {
 	db, p := newTestDB(t)
 	for range 3 {
-		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, true, false, 40, 30*time.Second, time.Now())
+		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, true, false, "random", 40, 30*time.Second, time.Now())
 	}
 	for range 2 {
-		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, true, 40, 30*time.Second, time.Now())
+		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, true, "random", 40, 30*time.Second, time.Now())
 	}
 	punct, _ := PunctuationRunCount(db, p.ID)
 	zen, _ := ZenRunCount(db, p.ID)
@@ -659,9 +752,9 @@ func TestPunctuationAndZenRunCounts(t *testing.T) {
 
 func TestTotalWordsTypedIncludesKOs(t *testing.T) {
 	db, p := newTestDB(t)
-	RecordTestResult(db, p.ID, 50, 90, "words", 100, false, false, false, 100, 60*time.Second, time.Now())
-	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 42, 30*time.Second, time.Now())
-	RecordTestResult(db, p.ID, 30, 70, "time", 30, true, false, false, 18, 15*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 90, "words", 100, false, false, false, "random", 100, 60*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 42, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 30, 70, "time", 30, true, false, false, "random", 18, 15*time.Second, time.Now())
 	n, _ := TotalWordsTyped(db, p.ID)
 	if n != 160 {
 		t.Fatalf("expected 160 total words, got %d", n)
@@ -674,9 +767,9 @@ func TestTotalPlayTimeSumsDurationsIncludingKOs(t *testing.T) {
 	if d != 0 {
 		t.Fatalf("expected 0 with no history, got %v", d)
 	}
-	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 40, 30*time.Second, time.Now())
-	RecordTestResult(db, p.ID, 40, 80, "words", 100, false, false, false, 60, 90*time.Second, time.Now())
-	RecordTestResult(db, p.ID, 20, 60, "time", 60, true, false, false, 15, 20*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 40, 80, "words", 100, false, false, false, "random", 60, 90*time.Second, time.Now())
+	RecordTestResult(db, p.ID, 20, 60, "time", 60, true, false, false, "random", 15, 20*time.Second, time.Now())
 	d, _ = TotalPlayTime(db, p.ID)
 	if d != 140*time.Second {
 		t.Fatalf("expected 140s total play time, got %v", d)
@@ -687,13 +780,13 @@ func TestHasPracticedAllWeekdays(t *testing.T) {
 	db, p := newTestDB(t)
 	base := time.Date(2026, 1, 4, 12, 0, 0, 0, time.UTC) // a Sunday
 	for i := range 6 {
-		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 40, 30*time.Second, base.AddDate(0, 0, i))
+		RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, base.AddDate(0, 0, i))
 	}
 	got, _ := HasPracticedAllWeekdays(db, p.ID)
 	if got {
 		t.Fatal("expected false with only 6 distinct weekdays")
 	}
-	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, 40, 30*time.Second, base.AddDate(0, 0, 6))
+	RecordTestResult(db, p.ID, 50, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, base.AddDate(0, 0, 6))
 	got, _ = HasPracticedAllWeekdays(db, p.ID)
 	if !got {
 		t.Fatal("expected true with all 7 weekdays covered")
@@ -835,10 +928,10 @@ func TestSummaryAggregatesExercisesAvgWPMAndBestDay(t *testing.T) {
 	RecordActivity(db, p.ID, inRange.Add(24*time.Hour))
 	RecordActivity(db, p.ID, outOfRange)
 
-	RecordTestResult(db, p.ID, 60, 90, "time", 30, false, false, false, 40, 30*time.Second, inRange)
-	RecordTestResult(db, p.ID, 80, 95, "time", 30, false, false, false, 40, 30*time.Second, inRange.Add(24*time.Hour))
-	RecordTestResult(db, p.ID, 20, 60, "time", 30, true, false, false, 10, 15*time.Second, inRange) // KO, excluded from AvgWPM
-	RecordTestResult(db, p.ID, 999, 99, "time", 30, false, false, false, 40, 30*time.Second, outOfRange)
+	RecordTestResult(db, p.ID, 60, 90, "time", 30, false, false, false, "random", 40, 30*time.Second, inRange)
+	RecordTestResult(db, p.ID, 80, 95, "time", 30, false, false, false, "random", 40, 30*time.Second, inRange.Add(24*time.Hour))
+	RecordTestResult(db, p.ID, 20, 60, "time", 30, true, false, false, "random", 10, 15*time.Second, inRange) // KO, excluded from AvgWPM
+	RecordTestResult(db, p.ID, 999, 99, "time", 30, false, false, false, "random", 40, 30*time.Second, outOfRange)
 
 	s, err := Summary(db, p.ID, now.AddDate(0, 0, -7), now)
 	if err != nil {

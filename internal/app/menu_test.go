@@ -160,34 +160,51 @@ func press(t *testing.T, m menuModel, key rune) menuModel {
 	return next.(menuModel)
 }
 
-func TestSToggleTurnsOnQuotesAndForcesPunctuationOn(t *testing.T) {
+func TestSToggleTurnsOnQuotesWithoutTouchingPunctuationPreference(t *testing.T) {
 	m := newTestMenuModel(t)
-	if m.quotes {
-		t.Fatal("expected quotes off by default")
+	if m.quotes || m.punctuation {
+		t.Fatal("expected quotes and punctuation both off by default")
 	}
 	m = press(t, m, 's')
 	if !m.quotes {
 		t.Fatal("expected 's' to turn quotes on")
 	}
-	if !m.punctuation {
-		t.Fatal("expected turning quotes on to force punctuation on")
+	// m.punctuation is the player's own preference, independent of quotes
+	// mode -- it must NOT be mutated by turning quotes on (see menu.go's
+	// 's' case), otherwise it gets stuck "on" even after quotes mode is
+	// switched back off again.
+	if m.punctuation {
+		t.Fatal("expected turning quotes on to leave the underlying punctuation preference untouched")
 	}
 	settings, _ := storage.LoadSettings(m.db, m.profile.ID)
-	if !settings.Quotes || !settings.Punctuation {
-		t.Fatal("expected quotes and punctuation persisted to settings")
+	if !settings.Quotes || settings.Punctuation {
+		t.Fatal("expected quotes persisted on and punctuation persisted as the untouched (off) preference")
+	}
+}
+
+func TestTogglingQuotesOffRestoresPriorPunctuationPreference(t *testing.T) {
+	m := newTestMenuModel(t)
+	m = press(t, m, 's') // quotes on; punctuation preference still off underneath
+	m = press(t, m, 's') // quotes off again
+	if m.quotes {
+		t.Fatal("expected 's' pressed twice to leave quotes off")
+	}
+	if m.punctuation {
+		t.Fatal("expected punctuation preference to still read off after quotes mode round-trips")
 	}
 }
 
 func TestCAndFAreNoOpsWhileQuotesIsOn(t *testing.T) {
 	m := newTestMenuModel(t)
-	m = press(t, m, 's') // quotes on, punctuation forced on
-	m = press(t, m, 'c') // should be ignored: punctuation stays on, not toggled off
-	if !m.punctuation {
+	m = press(t, m, 's') // quotes on
+	before := m.punctuation
+	m = press(t, m, 'c') // should be ignored while quotes is on
+	if m.punctuation != before {
 		t.Fatal("expected 'c' to be a no-op while quotes is on")
 	}
-	before := m.focusWeak
+	beforeFocus := m.focusWeak
 	m = press(t, m, 'f')
-	if m.focusWeak != before {
+	if m.focusWeak != beforeFocus {
 		t.Fatal("expected 'f' to be a no-op while quotes is on")
 	}
 }

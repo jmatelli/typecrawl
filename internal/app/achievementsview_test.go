@@ -174,7 +174,7 @@ func TestNewAchievementsViewModelUsesCurrentStreakAndBestWPM(t *testing.T) {
 		t.Fatal(err)
 	}
 	storage.RecordActivity(db, profile.ID, time.Now())
-	storage.RecordPersonalBest(db, profile.ID, "time", 30, 65, 95, nil, nil, time.Now())
+	storage.RecordPersonalBest(db, profile.ID, "time", 30, "random", 65, 95, nil, nil, time.Now())
 
 	m := newAchievementsViewModel(profile, db)
 	if m.progress.DailyStreak < 1 {
