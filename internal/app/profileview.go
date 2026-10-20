@@ -63,6 +63,20 @@ func newProfileViewModel(profile *storage.Profile, db *sql.DB, width int) profil
 // grid itself still fits within the requested width.
 const gutterAllowance = 3
 
+// graphBoxStyle frames each graph (the trend charts and the GitHub-style
+// activity heatmap) in a rounded border so it reads as its own card rather
+// than bleeding into the stats and lines around it.
+var graphBoxStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+
+// keycapStyle frames a single weak-key character so it reads as a physical
+// keyboard key rather than a plain letter.
+var keycapStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+
+// keycapLetterStyle colors a keycap's letter red like wrongStyle, but
+// without the underline -- which reads as a stray mark sitting on the
+// border directly beneath it rather than as emphasis.
+var keycapLetterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+
 func (m profileViewModel) Init() tea.Cmd { return nil }
 
 func (m profileViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -156,6 +170,7 @@ func (m profileViewModel) View() string {
 			m.bestOverall.Mode, m.bestOverall.Target,
 		)
 	}
+	progress := m.achievementProgress()
 	stats := lipgloss.JoinVertical(lipgloss.Left,
 		fmt.Sprintf("Name:         %s%s", boldStyle.Render(m.profile.Name), titleSuffix(m.profile.EquippedTitle)),
 		fmt.Sprintf("Level:        %s", boldStyle.Render(fmt.Sprintf("%d", m.profile.Level))),
@@ -169,40 +184,99 @@ func (m profileViewModel) View() string {
 			wrongStyle.Render(fmt.Sprintf("%d", m.profile.KOCount)),
 			successRateSuffix(m.profile.SuccessCount, m.profile.KOCount),
 		),
+		fmt.Sprintf("Achievements: %s", boldStyle.Render(fmt.Sprintf("%d/%d unlocked", achievements.UnlockedCount(progress), len(achievements.All)))),
 		fmt.Sprintf("Joined:       %s", m.profile.CreatedAt.Format("2006-01-02")),
 	)
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, art, "    ", stats)
-	activityGraph := heatmap.Render(m.activity, m.weeks)
+	body := graphBoxStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, art, "    ", stats))
 
-	weakLine := "Weakest keys: " + dimStyle.Render("not enough data yet")
-	if len(m.weakChars) > 0 {
-		labels := make([]string, len(m.weakChars))
-		for i, r := range m.weakChars {
-			labels[i] = string(r)
+	// "Almost there" sits next to the avatar/stats card as its own card, so
+	// the top of the page tells you where you stand and what's next in one
+	// glance, rather than burying the nudge down near the help line: a
+	// title line above a two-column list, achievement name left-aligned
+	// and its progress right-aligned so every fraction lines up.
+	var almostBox string
+	if nearest := achievements.Nearest(progress, 3); len(nearest) > 0 {
+		maxNameLen, maxProgressLen := 0, 0
+		progresses := make([]string, len(nearest))
+		for i, lp := range nearest {
+			progresses[i] = fmt.Sprintf("(%s)", formatNudgeProgress(lp))
+			maxNameLen = max(maxNameLen, len(lp.Achievement.Name))
+			maxProgressLen = max(maxProgressLen, len(progresses[i]))
 		}
-		weakLine = "Weakest keys: " + wrongStyle.Render(strings.Join(labels, "  "))
+
+		lines := make([]string, 0, len(nearest)+1)
+		lines = append(lines, boldStyle.Render("Almost there"))
+		for i, lp := range nearest {
+			lines = append(lines, fmt.Sprintf("%-*s  %*s", maxNameLen, lp.Achievement.Name, maxProgressLen, progresses[i]))
+		}
+
+		almostBox = graphBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 	}
+
+	// Weakest keys sits below "Almost there" in the same right-hand
+	// column, each weak key rendered as its own bordered keycap.
+	weakTitle := boldStyle.Render("Weakest keys")
+	var weakBody string
+	if len(m.weakChars) > 0 {
+		keys := make([]string, len(m.weakChars))
+		for i, r := range m.weakChars {
+			keys[i] = keycapStyle.Render(keycapLetterStyle.Render(string(r)))
+		}
+		keyParts := make([]string, 0, len(keys)*2-1)
+		for i, k := range keys {
+			if i > 0 {
+				keyParts = append(keyParts, " ")
+			}
+			keyParts = append(keyParts, k)
+		}
+		weakBody = lipgloss.JoinHorizontal(lipgloss.Top, keyParts...)
+	} else {
+		weakBody = dimStyle.Render("not enough data yet")
+	}
+	weakBox := graphBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, weakTitle, weakBody))
+
+	rightCol := lipgloss.JoinVertical(lipgloss.Left, almostBox, "", weakBox)
+	if almostBox == "" {
+		rightCol = weakBox
+	}
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, body, "  ", rightCol)
+
+	activityGraph := graphBoxStyle.Render(heatmap.Render(m.activity, m.weeks))
 
 	graphWidth := m.weeks*2 + gutterAllowance
 	if graphWidth < 20 {
 		graphWidth = 40
 	}
+	// Each trend graph sits in its own box next to the other, so it only
+	// gets half the activity heatmap's width (minus a little for the gap
+	// between the two boxes); graph.Render clamps back up to a readable
+	// minimum on narrow terminals.
+	halfGraphWidth := (graphWidth - 4) / 2
+
 	var trendGraph string
 	if len(m.wpmHistory) >= 2 {
-		trendGraph = graph.Render("WPM trend (last 30 tests)", m.wpmHistory, nil, graphWidth, 8)
+		trendGraph = graph.Render("WPM trend (last 30 tests)", m.wpmHistory, nil, halfGraphWidth, 8)
 	} else {
 		trendGraph = dimStyle.Render("WPM trend: not enough completed tests yet")
 	}
+	trendGraph = graphBoxStyle.Render(trendGraph)
+
 	var accuracyTrendGraph string
 	if len(m.accuracyHistory) >= 2 {
-		accuracyTrendGraph = graph.Render("Accuracy trend (last 30 tests)", m.accuracyHistory, nil, graphWidth, 8)
+		accuracyTrendGraph = graph.Render("Accuracy trend (last 30 tests)", m.accuracyHistory, nil, halfGraphWidth, 8)
 	} else {
 		accuracyTrendGraph = dimStyle.Render("Accuracy trend: not enough completed tests yet")
 	}
+	accuracyTrendGraph = graphBoxStyle.Render(accuracyTrendGraph)
 
-	weekLine := formatPeriodSummary("This week", m.weekSummary)
-	monthLine := formatPeriodSummary("This month", m.monthSummary)
+	trendsRow := lipgloss.JoinHorizontal(lipgloss.Top, trendGraph, "  ", accuracyTrendGraph)
+
+	summaryBox := graphBoxStyle.Render(lipgloss.JoinVertical(
+		lipgloss.Left,
+		formatPeriodSummary("This week", m.weekSummary),
+		formatPeriodSummary("This month", m.monthSummary),
+	))
 
 	var confirmLine string
 	if m.confirm != "" {
@@ -220,32 +294,14 @@ func (m profileViewModel) View() string {
 		errLine = wrongStyle.Render(m.errMsg)
 	}
 
-	progress := m.achievementProgress()
-	achievementsLine := fmt.Sprintf(
-		"Achievements: %s   (a to view all)",
-		boldStyle.Render(fmt.Sprintf("%d/%d unlocked", achievements.UnlockedCount(progress), len(achievements.All))),
-	)
-
-	var almostLine string
-	if nearest := achievements.Nearest(progress, 3); len(nearest) > 0 {
-		parts := make([]string, len(nearest))
-		for i, lp := range nearest {
-			parts[i] = fmt.Sprintf("%s (%s)", boldStyle.Render(lp.Achievement.Name), formatNudgeProgress(lp))
-		}
-		almostLine = "Almost there:  " + strings.Join(parts, "   ")
-	}
-
 	help := helpStyle.Render("esc: back to menu   a: achievements   h: history   k: weak keys   t: cycle title   r: reset   d: delete   ctrl+c: quit")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		title, "", body, "",
-		weakLine, "",
-		trendGraph, "",
-		accuracyTrendGraph, "",
+		title, "", topRow, "",
+		trendsRow, "",
 		activityGraph, "",
-		weekLine, monthLine, "",
-		achievementsLine, almostLine, "",
+		summaryBox, "",
 		confirmLine, errLine, help,
 	)
 }

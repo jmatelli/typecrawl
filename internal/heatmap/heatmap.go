@@ -130,6 +130,9 @@ func Render(counts map[string]int, weeks int) string {
 		b.WriteString("\n")
 	}
 
+	b.WriteString(dimStyle.Render(strings.Repeat("─", gutterWidth+cols*cellWidth)))
+	b.WriteString("\n")
+
 	b.WriteString(strings.Repeat(" ", gutterWidth))
 	fmt.Fprintf(&b, "%d exercises in the last %d weeks   ", total, weeks)
 	b.WriteString(dimStyle.Render("Less "))
