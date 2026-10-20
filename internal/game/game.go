@@ -31,8 +31,13 @@ const (
 	TierTransitionHPBonus = 50
 	// ComboWindow is how long a mistake stays "hot": another mistake
 	// inside this window increases the combo (and its damage) instead
-	// of starting over, and refreshes the window again.
-	ComboWindow = 2 * time.Second
+	// of starting over, and refreshes the window again. Halved from an
+	// original 2s: at that width, two mistakes that were really just
+	// unrelated slips a couple seconds apart still chained into an
+	// escalating combo, which is what made short, unlucky bursts of
+	// typos so disproportionately deadly (see ComboMultiplierGrowth and
+	// ComboMultiplierCap below for the other half of that fix).
+	ComboWindow = 1 * time.Second
 	// BaseMistakeDamage is the HP lost for a single isolated mistake on an
 	// Easy-tier word, before the per-tier multiplier below is applied. It
 	// does NOT scale with level on its own -- only MaxHP does -- so in
@@ -47,6 +52,19 @@ const (
 	// alone would suggest, because harder words are deliberately meant to
 	// sting more per slip.
 	BaseMistakeDamage = 20
+	// ComboMultiplierGrowth is how much the combo multiplier climbs per
+	// additional mistake inside ComboWindow, replacing a flat +1.0/hit
+	// (i.e. the multiplier doubling with every single hit: x1, x2, x3...)
+	// that made a short burst of mistakes deal quadratically growing
+	// cumulative damage -- three rapid-fire typos alone could exceed a
+	// level-1 character's entire max HP. At +0.5/hit, capped by
+	// ComboMultiplierCap below, a burst still costs more than the same
+	// number of isolated mistakes would, just not catastrophically so.
+	ComboMultiplierGrowth = 0.5
+	// ComboMultiplierCap ceilings the combo multiplier so an extended
+	// mistake streak keeps costing a steady amount per hit past this
+	// point instead of accelerating without bound.
+	ComboMultiplierCap = 3.0
 	// StreakBonusCap limits the per-word XP bonus from a mistake-free
 	// word streak so an extremely long streak keeps paying out at a
 	// steady rate instead of growing without bound.
@@ -172,12 +190,13 @@ var MistakeDamageMultiplier = []float64{1.0, 1.25, 1.5, 1.75}
 
 // ComboDamage returns the HP lost for the n-th consecutive mistake within
 // the combo window (n starts at 1, so a single isolated mistake costs
-// BaseMistakeDamage HP times the given word-difficulty tier's multiplier,
-// and each mistake landing inside the still-open window from the previous
-// one multiplies the damage further).
+// BaseMistakeDamage HP times the given word-difficulty tier's multiplier).
+// Each mistake landing inside the still-open window from the previous one
+// raises the multiplier by ComboMultiplierGrowth, up to ComboMultiplierCap.
 func ComboDamage(comboCount, tier int) int {
 	tier = min(max(tier, 0), len(MistakeDamageMultiplier)-1)
-	return int(math.Round(float64(comboCount) * float64(BaseMistakeDamage) * MistakeDamageMultiplier[tier]))
+	comboMultiplier := min(1+float64(comboCount-1)*ComboMultiplierGrowth, ComboMultiplierCap)
+	return int(math.Round(comboMultiplier * float64(BaseMistakeDamage) * MistakeDamageMultiplier[tier]))
 }
 
 // StreakBonus returns the bonus XP awarded for completing the streak-th

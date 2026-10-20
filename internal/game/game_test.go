@@ -101,6 +101,33 @@ func TestComboDamageClampsOutOfRangeTier(t *testing.T) {
 	}
 }
 
+func TestComboDamagePlateausAtTheMultiplierCap(t *testing.T) {
+	// Past the cap, each additional combo hit costs the same as the last
+	// one -- damage keeps accruing with a longer chain, but stops
+	// accelerating, unlike the uncapped growth this replaced.
+	comboAtCap := int(1+(ComboMultiplierCap-1)/ComboMultiplierGrowth) + 1
+	atCap := ComboDamage(comboAtCap, 0)
+	if got := ComboDamage(comboAtCap+1, 0); got != atCap {
+		t.Errorf("ComboDamage(%d, 0) = %d, want it to plateau at the capped %d", comboAtCap+1, got, atCap)
+	}
+	if got := ComboDamage(comboAtCap+50, 0); got != atCap {
+		t.Errorf("ComboDamage(%d, 0) = %d, want it to stay at the capped %d even far past it", comboAtCap+50, got, atCap)
+	}
+}
+
+func TestComboDamageBurstNoLongerKOsALevelOneCharacterInThreeHits(t *testing.T) {
+	// The original uncapped linear growth let 3 rapid-fire mistakes
+	// (20+40+60=120) alone exceed a level-1 character's 100 max HP. The
+	// flattened, capped growth must no longer do that in 3 hits.
+	cumulative := 0
+	for combo := 1; combo <= 3; combo++ {
+		cumulative += ComboDamage(combo, 0)
+	}
+	if cumulative >= BaseMaxHP {
+		t.Errorf("3-hit combo burst costs %d HP, want it to stay under a level-1 character's %d max HP", cumulative, BaseMaxHP)
+	}
+}
+
 func TestIsolatedMistakesToKOGetsMoreForgivingWithLevel(t *testing.T) {
 	// Documented design invariant: isolated (non-combo) mistakes-to-KO
 	// should go 5 -> 10 -> 13 -> 16 across the tier-1/10/20/30 boundary
