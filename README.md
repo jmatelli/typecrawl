@@ -43,6 +43,8 @@ go build -o typecrawl .
 typecrawl
 ```
 
+`tc` ships alongside `typecrawl` as a shorter alias -- same binary, same flags.
+
 On first run you'll be prompted to create a profile. From there:
 
 - **Menu**: `tab`/`m` switch mode, `←`/`→` or `h`/`l` change duration/word count, `c`/`z`/`f` toggle

@@ -8,8 +8,25 @@ before:
     - go mod tidy
 
 builds:
-  - main: .
+  - id: typecrawl
+    main: .
     binary: typecrawl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -X main.version={{.Version}}
+  # Same binary, built again under a short name -- a `tc` shortcut ships
+  # alongside `typecrawl` in every distribution channel (archives, Homebrew,
+  # .deb/.rpm) without each of them needing its own symlink/alias setup.
+  - id: tc
+    main: .
+    binary: tc
     env:
       - CGO_ENABLED=0
     goos:
@@ -64,8 +81,10 @@ brews:
     license: MIT
     install: |
       bin.install "typecrawl"
+      bin.install "tc"
     test: |
       system "#{bin}/typecrawl", "--list-profiles"
+      system "#{bin}/tc", "--list-profiles"
 
 release:
   footer: >-
