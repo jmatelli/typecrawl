@@ -31,6 +31,9 @@ var (
 	// that heals if typed clean.
 	goldenWordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 	greenWordStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+	hpHighStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	hpMidStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	hpLowStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 )
 
 type tickMsg time.Time
@@ -607,11 +610,11 @@ func hpStyleFor(hp, maxHP int) lipgloss.Style {
 	ratio := float64(hp) / float64(max(maxHP, 1))
 	switch {
 	case ratio > 0.5:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+		return hpHighStyle
 	case ratio > 0.2:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+		return hpMidStyle
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+		return hpLowStyle
 	}
 }
 

@@ -19,8 +19,13 @@ builds:
     goarch:
       - amd64
       - arm64
+    # trimpath drops local build-path info; -s -w strip debug symbols and
+    # the DWARF table, neither of which a shipped CLI binary needs. This
+    # cuts the binary size by roughly a third.
+    flags:
+      - -trimpath
     ldflags:
-      - -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}}
   # Same binary, built again under a short name -- a `tc` shortcut ships
   # alongside `typecrawl` in every distribution channel (archives, Homebrew,
   # .deb/.rpm) without each of them needing its own symlink/alias setup.
@@ -35,8 +40,10 @@ builds:
     goarch:
       - amd64
       - arm64
+    flags:
+      - -trimpath
     ldflags:
-      - -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}}
 
 archives:
   - formats: [tar.gz]
