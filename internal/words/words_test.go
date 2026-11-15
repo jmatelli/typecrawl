@@ -97,7 +97,7 @@ func TestForLevelRespectsTailForNoRepeatWindow(t *testing.T) {
 func TestForLevelWeakFallsBackToPlainSelectionWithNoWeakChars(t *testing.T) {
 	list := ForLevel(0, 0) // just to reference the tier, not used directly
 	_ = list
-	got := ForLevelWeak(30, 0, nil)
+	got := ForLevelWeak(30, 0, Weak{})
 	if len(got) != 30 {
 		t.Fatalf("expected 30 words, got %d", len(got))
 	}
@@ -140,7 +140,7 @@ func TestForLevelWeakBiasesTowardWeakCharacters(t *testing.T) {
 	weak := map[rune]int{rareChar: weakCharCap}
 	const n = 800
 	weightedCount := 0
-	for _, w := range ForLevelWeak(n, 0, weak) {
+	for _, w := range ForLevelWeak(n, 0, Weak{Chars: weak}) {
 		if containsChar(w) {
 			weightedCount++
 		}
@@ -222,7 +222,7 @@ func TestForLevelWithPunctuatedTailStillAvoidsImmediateRepeat(t *testing.T) {
 func TestFromListDrawsOnlyFromTheGivenList(t *testing.T) {
 	list := []string{"café", "école", "привет", "日本語"}
 	for _, weak := range []map[rune]int{nil, {'é': 5}} {
-		got := FromList(list, 200, weak)
+		got := FromList(list, 200, Weak{Chars: weak})
 		if len(got) != 200 {
 			t.Fatalf("expected 200 words, got %d", len(got))
 		}
@@ -242,7 +242,7 @@ func TestFromListBiasesTowardWeakCharacters(t *testing.T) {
 	for i := range 29 {
 		list = append(list, "w"+strings.Repeat("a", i+1))
 	}
-	got := FromList(list, 2000, map[rune]int{'z': weakCharCap})
+	got := FromList(list, 2000, Weak{Chars: map[rune]int{'z': weakCharCap}})
 	n := 0
 	for _, w := range got {
 		if w == "gz" {
@@ -260,7 +260,7 @@ func TestFromListBiasesTowardWeakCharacters(t *testing.T) {
 // window: the draw falls back to another word.
 func TestFromListAvoidsRepeatsEvenWhenOneWordDominates(t *testing.T) {
 	list := []string{"zzzzzzzzzz", "a", "b"}
-	got := FromList(list, 300, map[rune]int{'z': weakCharCap})
+	got := FromList(list, 300, Weak{Chars: map[rune]int{'z': weakCharCap}})
 	for i := 1; i < len(got); i++ {
 		if got[i] == got[i-1] {
 			t.Fatalf("expected no immediate repeat, got %q twice at %d", got[i], i)
@@ -274,7 +274,7 @@ func TestFromListIsQuickOnAHugeList(t *testing.T) {
 		list[i] = "word" + strings.Repeat("x", i%12)
 	}
 	start := time.Now()
-	FromList(list, 60, map[rune]int{'x': 3, 'w': 1})
+	FromList(list, 60, Weak{Chars: map[rune]int{'x': 3, 'w': 1}})
 	if d := time.Since(start); d > time.Second {
 		t.Fatalf("expected a 60-word top-up to be quick, took %v", d)
 	}
@@ -301,12 +301,32 @@ func TestPunctuateCapitalizesNonASCIIWholeLetters(t *testing.T) {
 // repeat back to back, including across top-ups.
 func TestFromListAvoidsRepeatsOfCapitalizedWords(t *testing.T) {
 	list := []string{"Haus", "Baum"}
-	got := FromList(list, 1, nil)
+	got := FromList(list, 1, Weak{})
 	for range 200 {
-		next := FromList(list, 1, nil, got...)
+		next := FromList(list, 1, Weak{}, got...)
 		if next[0] == got[len(got)-1] {
 			t.Fatalf("expected no repeat across top-ups, got %q twice", next[0])
 		}
 		got = append(got, next...)
+	}
+}
+
+// A weak key pair favours words holding those two keys side by side,
+// over words holding the same keys apart.
+func TestFromListBiasesTowardWeakPairs(t *testing.T) {
+	list := []string{"Thin"}
+	for i := range 29 {
+		list = append(list, "h"+strings.Repeat("a", i+1)+"t") // h and t, not together
+	}
+	got := FromList(list, 2000, Weak{Pairs: map[string]int{"th": weakCharCap}})
+	n := 0
+	for _, w := range got {
+		if w == "Thin" {
+			n++
+		}
+	}
+	// Uniform would give about 67; see TestFromListBiasesTowardWeakCharacters.
+	if n < 200 {
+		t.Fatalf("expected the word with the weak pair far more often, got %d of 2000", n)
 	}
 }

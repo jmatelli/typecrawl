@@ -22,6 +22,7 @@ func TestKeyRoundTrips(t *testing.T) {
 	for _, s := range []Source{
 		{Kind: Random},
 		{Kind: Quotes},
+		{Kind: Drill},
 		{Kind: WordList, Path: "/home/me/french.txt"},
 		{Kind: Text, Path: `C:\Users\me\code: notes.txt`},
 	} {
@@ -46,6 +47,7 @@ func TestNameHidesTheDirectory(t *testing.T) {
 		{Kind: WordList, Path: "/home/me/private/french.txt"}: "word list french.txt",
 		{Kind: Text, Path: `C:\Users\me\book.txt`}:            "text book.txt",
 		{Kind: Quotes}: "Quotes",
+		{Kind: Drill}:  "Drill",
 		{}:             "Random words",
 	}
 	for s, want := range cases {

@@ -74,6 +74,7 @@ func seedFullProfile(t *testing.T, db *sql.DB) *Profile {
 	must(RecordActivity(db, p.ID, day2))
 
 	must(RecordCharMistakes(db, p.ID, map[rune]int{'e': 7, ';': 2, 'é': 1}))
+	must(RecordMistakes(db, p.ID, map[rune]int{'e': 1}, map[string]int{"th": 3, "ré": 1}, day2))
 	must(ClaimDailyChallenge(db, p.ID, "2026-10-02", day2))
 	if _, err := ClaimWeeklyChallenge(db, p.ID, "2026-W40", day2); err != nil {
 		t.Fatal(err)
@@ -113,7 +114,7 @@ func comparable(t *testing.T, b *Backup) string {
 func rowCounts(t *testing.T, db *sql.DB) map[string]int {
 	t.Helper()
 	out := map[string]int{}
-	for _, table := range []string{"profiles", "settings", "test_history", "personal_bests", "daily_activity", "char_mistakes", "daily_challenge_claims", "custom_sources"} {
+	for _, table := range []string{"profiles", "settings", "test_history", "personal_bests", "daily_activity", "char_mistakes", "key_pair_mistakes", "daily_challenge_claims", "custom_sources"} {
 		var n int
 		if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
 			t.Fatal(err)
@@ -168,7 +169,8 @@ func TestExportImportRoundTripPreservesEverything(t *testing.T) {
 	for name, check := range map[string]func(*sql.DB, int64) (any, error){
 		"streak":         func(db *sql.DB, id int64) (any, error) { return CurrentStreak(db, id, asOf) },
 		"settings":       func(db *sql.DB, id int64) (any, error) { return LoadSettings(db, id) },
-		"weak chars":     func(db *sql.DB, id int64) (any, error) { return WeakCharWeights(db, id) },
+		"weak chars":     func(db *sql.DB, id int64) (any, error) { return WeakCharWeightsAt(db, id, asOf.AddDate(0, 1, 0)) },
+		"weak pairs":     func(db *sql.DB, id int64) (any, error) { return WeakPairWeightsAt(db, id, asOf.AddDate(0, 1, 0)) },
 		"quote runs":     func(db *sql.DB, id int64) (any, error) { return QuoteRunCount(db, id) },
 		"punct runs":     func(db *sql.DB, id int64) (any, error) { return PunctuationRunCount(db, id) },
 		"zen runs":       func(db *sql.DB, id int64) (any, error) { return ZenRunCount(db, id) },
@@ -303,6 +305,12 @@ func TestImportProfileRejectsInvalidBackupsAndChangesNothing(t *testing.T) {
 		"built-in saved source":  func(b *Backup) { b.CustomSources[0] = "quotes" },
 		"duplicate saved source": func(b *Backup) { b.CustomSources = append(b.CustomSources, b.CustomSources[0]) },
 		"bad selected source":    func(b *Backup) { b.Settings.CustomSource = "random" },
+		"weak key not mistyped":  func(b *Backup) { b.WeakKeys[0].Key = "z" },
+		"negative weak weight":   func(b *Backup) { b.WeakKeys[0].Weight = -1 },
+		"weak key without time":  func(b *Backup) { b.WeakKeys[0].UpdatedAt = time.Time{} },
+		"three-letter pair":      func(b *Backup) { b.WeakPairs[0].Key = "the" },
+		"duplicate pair":         func(b *Backup) { b.WeakPairs = append(b.WeakPairs, b.WeakPairs[0]) },
+		"negative pair count":    func(b *Backup) { b.WeakPairs[0].Count = -2 },
 		"accuracy over 100":      func(b *Backup) { b.History[0].Accuracy = 140 },
 		"history without a date": func(b *Backup) { b.History[2].CreatedAt = time.Time{} },
 		"negative best wpm":      func(b *Backup) { b.PersonalBests[0].WPM = -3 },

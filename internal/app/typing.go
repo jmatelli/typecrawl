@@ -91,11 +91,11 @@ type typingModel struct {
 	width      int
 	commits    []wordCommit // undo stack for backspacing across word boundaries
 
-	level       int          // game.DifficultyLevel at test start; sets the word difficulty tier
-	punctuation bool         // whether words get sentence-style capitals/punctuation
-	zenMode     bool         // disables HP loss/KO for pure practice
-	focusWeak   bool         // whether word choice is biased toward weak characters
-	weakChars   map[rune]int // profile's known weak characters, for biasing word choice
+	level       int        // game.DifficultyLevel at test start; sets the word difficulty tier
+	punctuation bool       // whether words get sentence-style capitals/punctuation
+	zenMode     bool       // disables HP loss/KO for pure practice
+	focusWeak   bool       // whether word choice is biased toward weak characters
+	weak        words.Weak // profile's weak keys and key pairs, for biasing word choice
 
 	// quotesMode draws exercise text from quotePool (real quotations)
 	// instead of internal/words' random word lists -- see genWords. It has
@@ -135,6 +135,13 @@ type typingModel struct {
 	xpBonus        int          // accumulated XP from the success streak
 	lastKeystroke  time.Time    // when the last rune/space was processed, for the streak's pause check
 	charMistakes   map[rune]int // this run's per-character mistake counts, for weak-key tracking
+	// pairMistakes counts this run's mistakes by key pair: the character
+	// before the mistyped one and the mistyped one, lowercase.
+	pairMistakes map[string]int
+	// missed holds the positions of words this run got wrong at any
+	// point, for a drill of them afterwards. Unlike wordHasMistake it's
+	// never cleared: a word mistyped and then fixed was still missed.
+	missed map[int]bool
 	// specialLanded counts the special words landed clean this run, for
 	// the daily challenges that ask for them. specialLandedAt holds the
 	// word positions already counted: backspacing across a streak
@@ -186,7 +193,7 @@ type typingModel struct {
 	pendingFinish tea.Cmd
 }
 
-func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation, zenMode, focusWeak, quotesMode bool, quotePool []quotes.Quote, weakChars map[rune]int, ghostPaceMS []int, ghostWPMSeries []float64) typingModel {
+func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation, zenMode, focusWeak, quotesMode bool, quotePool []quotes.Quote, weak words.Weak, ghostPaceMS []int, ghostWPMSeries []float64) typingModel {
 	// A quote's punctuation is part of its text, not an optional flourish
 	// layered on top the way words.Punctuate dresses up random words -- so
 	// quotes mode always counts as a punctuation-enabled run (this is what
@@ -210,7 +217,7 @@ func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation,
 		focusWeak:      focusWeak,
 		quotesMode:     quotesMode,
 		quotePool:      quotePool,
-		weakChars:      weakChars,
+		weak:           weak,
 		ghostPaceMS:    ghostPaceMS,
 		ghostWPMSeries: ghostWPMSeries,
 		hp:             maxHP,
@@ -223,19 +230,25 @@ func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation,
 	return m
 }
 
-// withCustomSource switches the run to the player's own file: loaded, a
-// word list's or a text's words as textsource.Load returned them. It
+// withCustomSource switches the run to the player's own file or a drill:
+// loaded is a word list's or a text's words as textsource.Load returned
+// them, or a drill's words in order. It
 // replaces the words the constructor generated. Like a quote, a text
 // carries its own punctuation, so it counts as a punctuation run and has
 // nothing for weak-key focus to bias.
 func (m typingModel) withCustomSource(src textsource.Source, loaded []string) typingModel {
 	m.custom, m.customWords = src, loaded
 	m.quotesMode, m.quotePool = false, nil
-	if src.Kind == textsource.Text {
+	switch src.Kind {
+	case textsource.Text:
 		m.punctuation = true
-		m.focusWeak, m.weakChars = false, nil
-	} else {
-		m.customWeights = words.Weights(loaded, m.weakChars)
+		m.focusWeak, m.weak = false, words.Weak{}
+	case textsource.Drill:
+		// Typed as given: the drill's words keep whatever punctuation
+		// they had, and there's no choice for weak-key focus to bias.
+		m.focusWeak, m.weak = false, words.Weak{}
+	default:
+		m.customWeights = words.Weights(loaded, m.weak)
 	}
 	n := m.target
 	if m.mode == modeTime {
@@ -258,14 +271,14 @@ func (m typingModel) withCustomSource(src textsource.Source, loaded []string) ty
 func (m typingModel) genWords(n int, tail ...string) []string {
 	var list []string
 	switch {
-	case m.custom.Kind == textsource.Text:
+	case m.custom.Kind == textsource.Text || m.custom.Kind == textsource.Drill:
 		return textsource.InOrder(m.customWords, len(tail), n)
 	case m.custom.Kind == textsource.WordList:
 		list = words.FromWeighted(m.customWords, m.customWeights, n, tail...)
 	case m.quotesMode:
 		return quotes.Words(m.quotePool, n)
 	default:
-		list = words.ForLevelWeak(n, m.level, m.weakChars, tail...)
+		list = words.ForLevelWeak(n, m.level, m.weak, tail...)
 	}
 	if m.punctuation {
 		list = words.Punctuate(list)
@@ -439,15 +452,47 @@ func (m *typingModel) typeRune(r rune) bool {
 	expected := []rune(m.wordList[m.wordIndex])
 	pos := utf8.RuneCountInString(m.current)
 	correct := pos < len(expected) && expected[pos] == r
+	if !correct {
+		m.markMissed()
+	}
 	if !correct && pos < len(expected) {
 		if m.charMistakes == nil {
 			m.charMistakes = make(map[rune]int)
 		}
 		m.charMistakes[unicode.ToLower(expected[pos])]++
+		if pos > 0 {
+			if m.pairMistakes == nil {
+				m.pairMistakes = make(map[string]int)
+			}
+			m.pairMistakes[string([]rune{unicode.ToLower(expected[pos-1]), unicode.ToLower(expected[pos])})]++
+		}
 	}
 	m.tracker.RecordChar(correct, m.wordIndex)
 	m.current += string(r)
 	return correct
+}
+
+// markMissed notes the current word as missed.
+func (m *typingModel) markMissed() {
+	if m.missed == nil {
+		m.missed = make(map[int]bool)
+	}
+	m.missed[m.wordIndex] = true
+}
+
+// missedWords returns the words this run missed, each once, in the order
+// they came up. Only words actually typed into can be missed, so the
+// unreached lookahead never is.
+func (m typingModel) missedWords() []string {
+	var out []string
+	seen := map[string]bool{}
+	for i, w := range m.wordList {
+		if m.missed[i] && !seen[w] {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // lettersCut is how many letters of the current word the battle strip's
@@ -565,6 +610,10 @@ func (m *typingModel) completeWord() {
 		pageStart:    m.pageStart,
 	})
 
+	// A word sent short or long, with no wrong key in it, was missed too.
+	if m.current != m.wordList[m.wordIndex] {
+		m.markMissed()
+	}
 	m.tracker.RecordWordComplete(m.current, m.wordList[m.wordIndex])
 	m.typedWords = append(m.typedWords, m.current)
 
@@ -677,6 +726,8 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 	xpBonus, bestCombo := m.xpBonus, m.bestCombo
 	mode, target := m.mode, m.target
 	charMistakes := m.charMistakes
+	pairMistakes := m.pairMistakes
+	missedWords := m.missedWords()
 	hitCount := m.hitCount
 	punctuation, zenMode := m.punctuation, m.zenMode
 	quotesMode := m.quotesMode
@@ -687,6 +738,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 		result: result, hp: hp, maxHP: maxHP, ko: ko,
 		xpBonus: xpBonus, bestCombo: bestCombo,
 		mode: mode, target: target, charMistakes: charMistakes,
+		pairMistakes: pairMistakes, missedWords: missedWords,
 		hitCount:    hitCount,
 		punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, custom: custom, wordsTyped: wordsTyped,
 		ghostWPMSeries: ghostWPMSeries,

@@ -27,6 +27,9 @@ const (
 	Quotes   Kind = "quotes"   // cached quotations
 	WordList Kind = "wordlist" // a player's file of words, drawn at random
 	Text     Kind = "text"     // a player's text file, typed in order
+	// Drill is a run built from the words the player missed in the run
+	// before it, typed in the order given. It has no file.
+	Drill Kind = "drill"
 )
 
 // Source is one source of exercise text. The zero value is Random.
@@ -49,6 +52,13 @@ func (s Source) Custom() bool {
 	return s.Kind == WordList || s.Kind == Text
 }
 
+// Practice reports whether s is text the player picked or made rather
+// than the game's own: a file of theirs or a drill of their missed words.
+// Runs on it earn XP but count toward no achievement or challenge.
+func (s Source) Practice() bool {
+	return s.Custom() || s.Kind == Drill
+}
+
 // Key is how s is stored: "random", "quotes", or the kind and the file's
 // path, as in "wordlist:/home/me/french.txt". Personal bests and history
 // are kept per key, so each file has its own records.
@@ -56,8 +66,8 @@ func (s Source) Key() string {
 	switch s.Kind {
 	case WordList, Text:
 		return string(s.Kind) + ":" + s.Path
-	case Quotes:
-		return string(Quotes)
+	case Quotes, Drill:
+		return string(s.Kind)
 	default:
 		return string(Random)
 	}
@@ -70,6 +80,8 @@ func Parse(key string) (s Source, ok bool) {
 		return Source{Kind: Random}, true
 	case string(Quotes):
 		return Source{Kind: Quotes}, true
+	case string(Drill):
+		return Source{Kind: Drill}, true
 	}
 	kind, path, found := strings.Cut(key, ":")
 	if !found || path == "" || (kind != string(WordList) && kind != string(Text)) {
@@ -101,6 +113,8 @@ func (s Source) Name() string {
 		return "text " + s.FileName()
 	case Quotes:
 		return "Quotes"
+	case Drill:
+		return "Drill"
 	default:
 		return "Random words"
 	}

@@ -24,7 +24,7 @@ type RunSummary struct {
 	FinishedAt time.Time `json:"finished_at"`
 	Mode       string    `json:"mode"`   // "time" or "words"
 	Target     int       `json:"target"` // seconds for "time", words for "words"
-	Source     string    `json:"source"` // "random", "quotes", "wordlist" or "text"
+	Source     string    `json:"source"` // "random", "quotes", "wordlist", "text" or "drill"
 	// SourceName is a word list's or text's file name, without the
 	// directories leading to it, which can say more than a player means
 	// to share. Empty for the built-in sources.
@@ -84,6 +84,8 @@ func (s RunSummary) Text() string {
 		setup = append(setup, "quotes")
 	case textsource.Text:
 		setup = append(setup, "text "+s.SourceName)
+	case textsource.Drill:
+		setup = append(setup, "drill")
 	case textsource.WordList:
 		setup = append(setup, "word list "+s.SourceName)
 		if s.Punctuation {
