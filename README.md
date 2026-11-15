@@ -131,8 +131,8 @@ A session with no finished run prints nothing.
 ### Backup and restore
 
 `--export` writes everything a profile owns to a JSON file: level and XP, test history, personal bests
-and ghost runs, settings, the daily streak and activity heatmap, weak-key counts, and daily challenge
-claims. `--import` creates a new profile from that file, on the same machine or another one:
+and ghost runs, settings, the daily streak and activity heatmap, weak-key counts, and daily and weekly
+challenge claims. `--import` creates a new profile from that file, on the same machine or another one:
 
 ```sh
 typecrawl --profile Alice --export backup.json
@@ -144,6 +144,19 @@ Import never overwrites or merges into an existing profile: if the name is alrea
 imported. Files exported by v0.3.0 or earlier can still be imported, but they lack settings, weak-key
 counts and daily challenge claims, and every run in them is imported as a random-words run, so progress
 toward the quotes-mode achievements is not restored.
+
+### Challenges
+
+The menu shows two challenges, each paying a one-off XP bonus that the daily streak multiplier doesn't
+apply to.
+
+- **Daily**: one objective for a single run, the same for everyone on a given day. It's rated easy
+  (+30 XP), medium (+50) or hard (+80). Some ask for a setup (quotes, punctuation, a 2-minute run), others
+  for a result (accuracy, speed, a word streak, no hits taken) or for landing green, blue or other special
+  words.
+- **Weekly**: one goal reached over several runs from Monday to Sunday, such as 10 exercises, 1,000
+  words or 4 different days of practice. The menu shows your progress, for example `4/10`. Progress comes
+  from your run history, and runs that ended in a knockout don't count.
 
 ### Battle strip
 

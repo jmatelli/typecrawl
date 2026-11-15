@@ -176,3 +176,90 @@ func TestRewardsDifferByDifficulty(t *testing.T) {
 		}
 	}
 }
+
+func TestWeekKeyUsesTheISOYear(t *testing.T) {
+	cases := map[time.Time]string{
+		time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC): "2026-W46",
+		time.Date(2026, 12, 28, 12, 0, 0, 0, time.UTC): "2026-W53",
+		time.Date(2027, 1, 3, 12, 0, 0, 0, time.UTC):   "2026-W53", // a Sunday still in 2026's last week
+		time.Date(2027, 1, 4, 12, 0, 0, 0, time.UTC):   "2027-W01",
+		time.Date(2024, 12, 30, 12, 0, 0, 0, time.UTC): "2025-W01", // a Monday already in 2025's first week
+	}
+	for d, want := range cases {
+		if got := WeekKey(d); got != want {
+			t.Errorf("WeekKey(%s) = %q, want %q", d.Format("2006-01-02"), got, want)
+		}
+	}
+}
+
+func TestWeekBoundsRunMondayToMonday(t *testing.T) {
+	sunday := time.Date(2026, 11, 22, 23, 59, 59, 0, time.UTC)
+	monday := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	start, end := WeekBounds(sunday)
+	if !start.Equal(time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)) || !end.Equal(monday) {
+		t.Fatalf("WeekBounds(Sunday 23:59) = %s .. %s", start, end)
+	}
+	if s, _ := WeekBounds(monday); !s.Equal(monday) {
+		t.Fatalf("Monday 00:00 must start its own week, got %s", s)
+	}
+	if WeekKey(sunday) == WeekKey(monday) {
+		t.Fatal("Sunday 23:59 and the next Monday 00:00 must be different weeks")
+	}
+}
+
+// Across a DST change the week still starts and ends at local midnight,
+// even though it's an hour shorter or longer.
+func TestWeekBoundsAcrossDST(t *testing.T) {
+	paris, err := time.LoadLocation("Europe/Paris")
+	if err != nil {
+		t.Skip("no time zone data:", err)
+	}
+	// Clocks went back on Sunday 25 October 2026.
+	start, end := WeekBounds(time.Date(2026, 10, 25, 20, 0, 0, 0, paris))
+	if start != time.Date(2026, 10, 19, 0, 0, 0, 0, paris) || end != time.Date(2026, 10, 26, 0, 0, 0, 0, paris) {
+		t.Fatalf("got %s .. %s", start, end)
+	}
+	if end.Sub(start) != 7*24*time.Hour+time.Hour {
+		t.Fatalf("expected a 169-hour week, got %s", end.Sub(start))
+	}
+}
+
+func TestThisWeekIsStableWithinAWeekAndCoversThePool(t *testing.T) {
+	monday := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	for i := 1; i < 7; i++ {
+		if ThisWeek(monday.AddDate(0, 0, i)).ID != ThisWeek(monday).ID {
+			t.Fatalf("day %d of the week got a different weekly challenge", i)
+		}
+	}
+	seen := map[string]bool{}
+	for i := range 52 * 4 {
+		seen[ThisWeek(monday.AddDate(0, 0, 7*i)).ID] = true
+	}
+	if len(seen) != len(weeklyPool) {
+		t.Fatalf("expected all %d weekly challenges over four years, saw %d", len(weeklyPool), len(seen))
+	}
+}
+
+func TestWeeklyProgressAndCompletion(t *testing.T) {
+	ids := map[string]bool{}
+	for _, c := range weeklyPool {
+		if ids[c.ID] || c.Goal <= 0 || c.XPBonus <= 0 || c.Description == "" {
+			t.Errorf("weekly challenge %q has a duplicate ID or an empty field", c.ID)
+		}
+		ids[c.ID] = true
+		if c.Completed(Week{}) || c.Progress(Week{}) != 0 {
+			t.Errorf("%s: an empty week must have no progress", c.ID)
+		}
+	}
+	runs := weeklyPool[0]
+	if runs.Progress(Week{Runs: 4}) != 4 || runs.Completed(Week{Runs: 9}) || !runs.Completed(Week{Runs: 10}) {
+		t.Error("week_runs_10: wrong progress or completion")
+	}
+	if runs.Progress(Week{Runs: 25}) != 10 {
+		t.Error("progress must be capped at the goal")
+	}
+	minutes := weeklyPool[4]
+	if minutes.Progress(Week{Seconds: 29*60 + 59}) != 29 || !minutes.Completed(Week{Seconds: 30 * 60}) {
+		t.Error("week_minutes_30: wrong progress or completion")
+	}
+}

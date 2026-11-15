@@ -50,19 +50,24 @@ var (
 )
 
 type menuModel struct {
-	db          *sql.DB
-	profile     *storage.Profile
-	streakDays  int
-	mode        testMode
-	timeOpts    []int
-	wordOpts    []int
-	timeIdx     int
-	wordIdx     int
-	punctuation bool
-	zenMode     bool
-	focusWeak   bool
-	quotes      bool // draws exercise text from cached quotes instead of random words
-	battle      bool // shows the battle strip below the words
+	db         *sql.DB
+	profile    *storage.Profile
+	streakDays int
+	// weekly is this week's challenge, loaded with the menu (which is
+	// rebuilt after every run) rather than on every redraw.
+	weekly         challenge.Weekly
+	weeklyProgress int
+	weeklyClaimed  bool
+	mode           testMode
+	timeOpts       []int
+	wordOpts       []int
+	timeIdx        int
+	wordIdx        int
+	punctuation    bool
+	zenMode        bool
+	focusWeak      bool
+	quotes         bool // draws exercise text from cached quotes instead of random words
+	battle         bool // shows the battle strip below the words
 	// keyboardLayout isn't shown or changed here (the Weak Keys screen does
 	// that), but it's carried so saveSettings doesn't reset it.
 	keyboardLayout string
@@ -85,21 +90,26 @@ func newMenuModel(profile *storage.Profile, db *sql.DB) menuModel {
 
 	settings, _ := storage.LoadSettings(db, profile.ID) // best-effort; zero value still yields sane defaults
 	streakDays, _ := storage.CurrentStreak(db, profile.ID, time.Now())
+	weekly, week, weeklyClaimed := weeklyStatus(db, profile.ID, time.Now())
 
 	m := menuModel{
-		db:          db,
-		profile:     profile,
-		streakDays:  streakDays,
-		mode:        modeTime,
-		timeOpts:    timeOpts,
-		wordOpts:    wordOpts,
-		timeIdx:     indexOf(timeOpts, settings.Duration),
-		wordIdx:     indexOf(wordOpts, settings.WordCount),
-		punctuation: settings.Punctuation,
-		zenMode:     settings.ZenMode,
-		focusWeak:   settings.FocusWeak,
-		quotes:      settings.Quotes,
-		battle:      !settings.HideBattleStrip,
+		db: db,
+
+		weekly:         weekly,
+		weeklyProgress: weekly.Progress(week),
+		weeklyClaimed:  weeklyClaimed,
+		profile:        profile,
+		streakDays:     streakDays,
+		mode:           modeTime,
+		timeOpts:       timeOpts,
+		wordOpts:       wordOpts,
+		timeIdx:        indexOf(timeOpts, settings.Duration),
+		wordIdx:        indexOf(wordOpts, settings.WordCount),
+		punctuation:    settings.Punctuation,
+		zenMode:        settings.ZenMode,
+		focusWeak:      settings.FocusWeak,
+		quotes:         settings.Quotes,
+		battle:         !settings.HideBattleStrip,
 
 		keyboardLayout: settings.KeyboardLayout,
 	}
@@ -234,6 +244,7 @@ func (m menuModel) View() string {
 	} else {
 		challengeLine = fmt.Sprintf("Daily challenge (%s): %s   %s", today.Difficulty, today.Description, streakStyle.Render(fmt.Sprintf("+%d XP", today.XPBonus)))
 	}
+	challengeLine = lipgloss.JoinVertical(lipgloss.Left, challengeLine, m.weeklyLine())
 
 	modeStr := "Time"
 	if m.mode == modeWords {
@@ -295,4 +306,15 @@ func (m menuModel) View() string {
 		sourceLine, togglesLine, "",
 		help,
 	)
+}
+
+// weeklyLine shows this week's challenge and the progress toward it.
+func (m menuModel) weeklyLine() string {
+	if m.weeklyClaimed {
+		return dimStyle.Render(fmt.Sprintf("Weekly challenge (complete): %s", m.weekly.Description))
+	}
+	return fmt.Sprintf("Weekly challenge: %s   %s   %s",
+		m.weekly.Description,
+		boldStyle.Render(fmt.Sprintf("%d/%d", m.weeklyProgress, m.weekly.Goal)),
+		streakStyle.Render(fmt.Sprintf("+%d XP", m.weekly.XPBonus)))
 }

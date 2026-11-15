@@ -40,6 +40,12 @@ var ErrInvalidName = errors.New("invalid profile name")
 // could not have come from a real profile.
 var ErrInvalidBackup = errors.New("invalid backup")
 
+// WeeklyChallengeClaim records one week's claimed weekly-challenge bonus.
+type WeeklyChallengeClaim struct {
+	Week      string    `json:"week"` // challenge.WeekKey format, e.g. "2026-W46"
+	ClaimedAt time.Time `json:"claimed_at"`
+}
+
 // ChallengeClaim records one day's claimed daily-challenge bonus.
 type ChallengeClaim struct {
 	Day       string    `json:"day"`
@@ -63,6 +69,9 @@ type Backup struct {
 	// CharMistakes maps a single character to its mistake count.
 	CharMistakes    map[string]int   `json:"char_mistakes"`
 	ChallengeClaims []ChallengeClaim `json:"challenge_claims"`
+	// WeeklyChallengeClaims is absent from backups made before weekly
+	// challenges existed, which then import with no weekly claims.
+	WeeklyChallengeClaims []WeeklyChallengeClaim `json:"weekly_challenge_claims,omitempty"`
 }
 
 // IsPartial reports whether b predates version 2 and so lacks settings,
@@ -208,6 +217,18 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 		return nil, err
 	}
 
+	err = queryEach(tx, `SELECT week, claimed_at FROM weekly_challenge_claims WHERE profile_id = ? ORDER BY week`, id, func(rows *sql.Rows) error {
+		var c WeeklyChallengeClaim
+		if err := rows.Scan(&c.Week, &c.ClaimedAt); err != nil {
+			return err
+		}
+		b.WeeklyChallengeClaims = append(b.WeeklyChallengeClaims, c)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return b, nil
 }
 
@@ -321,6 +342,11 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 
 	for _, c := range b.ChallengeClaims {
 		if _, err := tx.Exec(`INSERT INTO daily_challenge_claims (profile_id, day, claimed_at) VALUES (?, ?, ?)`, id, c.Day, dbTime(c.ClaimedAt)); err != nil {
+			return nil, err
+		}
+	}
+	for _, c := range b.WeeklyChallengeClaims {
+		if _, err := tx.Exec(`INSERT INTO weekly_challenge_claims (profile_id, week, claimed_at) VALUES (?, ?, ?)`, id, c.Week, dbTime(c.ClaimedAt)); err != nil {
 			return nil, err
 		}
 	}
@@ -453,7 +479,27 @@ func (b *Backup) validate() error {
 		claimed[c.Day] = true
 	}
 
+	claimedWeeks := make(map[string]bool, len(b.WeeklyChallengeClaims))
+	for _, c := range b.WeeklyChallengeClaims {
+		if !validWeek(c.Week) || claimedWeeks[c.Week] || c.ClaimedAt.IsZero() {
+			return fmt.Errorf("weekly challenge claim %q is invalid or duplicated", c.Week)
+		}
+		claimedWeeks[c.Week] = true
+	}
+
 	return nil
+}
+
+// validWeek accepts an ISO week key such as "2026-W46".
+func validWeek(w string) bool {
+	var year, week int
+	if len(w) != 8 {
+		return false
+	}
+	if n, err := fmt.Sscanf(w, "%4d-W%2d", &year, &week); err != nil || n != 2 {
+		return false
+	}
+	return fmt.Sprintf("%04d-W%02d", year, week) == w && week >= 1 && week <= 53
 }
 
 func validMode(m string) bool {
