@@ -14,13 +14,16 @@ import (
 )
 
 type keyboardViewModel struct {
+	db      *sql.DB
 	profile *storage.Profile
 	weights map[rune]int
+	layout  keyboard.Layout
 }
 
 func newKeyboardViewModel(profile *storage.Profile, db *sql.DB) keyboardViewModel {
 	weights, _ := storage.WeakCharWeights(db, profile.ID) // best-effort; nil renders as "not enough data"
-	return keyboardViewModel{profile: profile, weights: weights}
+	settings, _ := storage.LoadSettings(db, profile.ID)   // best-effort; "" draws QWERTY
+	return keyboardViewModel{db: db, profile: profile, weights: weights, layout: keyboard.Lookup(settings.KeyboardLayout)}
 }
 
 func (m keyboardViewModel) Init() tea.Cmd { return nil }
@@ -33,6 +36,9 @@ func (m keyboardViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch keyMsg.String() {
 	case "esc", "b", "q":
 		return m, func() tea.Msg { return viewProfileMsg{} }
+	case "l":
+		m.layout = keyboard.Next(m.layout)
+		_ = storage.SaveKeyboardLayout(m.db, m.profile.ID, m.layout.ID) // best-effort; the screen still shows the choice
 	case "ctrl+c":
 		return m, tea.Quit
 	}
@@ -41,15 +47,15 @@ func (m keyboardViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m keyboardViewModel) View() string {
 	title := titleStyle.Render("Weak Keys")
-	subtitle := boldStyle.Render(m.profile.Name)
-	help := helpStyle.Render("esc: back to profile   ctrl+c: quit")
+	subtitle := boldStyle.Render(m.profile.Name) + dimStyle.Render("   layout: ") + m.layout.Name
+	help := helpStyle.Render("l: change layout   esc: back to profile   ctrl+c: quit")
 
 	if len(m.weights) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, title, subtitle, "",
 			dimStyle.Render("not enough mistakes recorded yet"), "", help)
 	}
 
-	kb := keyboard.Render(m.weights)
+	kb := keyboard.Render(m.weights, m.layout)
 
 	type charCount struct {
 		r rune

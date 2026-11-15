@@ -119,8 +119,8 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 
 	var s Settings
 	var punctuation, zenMode, focusWeak, quotes, hideBattleStrip int
-	err = tx.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip FROM settings WHERE profile_id = ?`, id).
-		Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip)
+	err = tx.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout FROM settings WHERE profile_id = ?`, id).
+		Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip, &s.KeyboardLayout)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		s = defaultSettings()
@@ -276,9 +276,9 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 
 	if s := b.Settings; s != nil {
 		_, err := tx.Exec(`
-			INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, s.Mode, s.Duration, s.WordCount, boolInt(s.Punctuation), boolInt(s.ZenMode), boolInt(s.FocusWeak), boolInt(s.Quotes), boolInt(s.HideBattleStrip))
+			INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, s.Mode, s.Duration, s.WordCount, boolInt(s.Punctuation), boolInt(s.ZenMode), boolInt(s.FocusWeak), boolInt(s.Quotes), boolInt(s.HideBattleStrip), s.KeyboardLayout)
 		if err != nil {
 			return nil, err
 		}
@@ -402,6 +402,12 @@ func (b *Backup) validate() error {
 	if s := b.Settings; s != nil {
 		if !validMode(s.Mode) || s.Duration <= 0 || s.WordCount <= 0 {
 			return errors.New("settings have an unknown mode or a non-positive duration or word count")
+		}
+		// An unknown layout is let through rather than rejected: a backup
+		// from a newer version may name one this version lacks, and it
+		// only changes how the heatmap is drawn (it falls back to QWERTY).
+		if len(s.KeyboardLayout) > 32 || strings.ContainsFunc(s.KeyboardLayout, unicode.IsControl) {
+			return errors.New("settings have a malformed keyboard layout")
 		}
 	}
 
