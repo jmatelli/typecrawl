@@ -352,26 +352,6 @@ func nameTaken(tx *sql.Tx, name string) (bool, error) {
 	return false, rows.Err()
 }
 
-// dbTime formats t the way SQLite itself writes timestamps, keeping t's
-// own UTC offset so the hour of day a run happened at survives (the
-// time-of-day achievements depend on it).
-//
-// Import can't hand the driver a time.Time like the rest of this package
-// does: the driver stores those as t.String(), and a time decoded from
-// JSON usually has an unnamed zone, which String() prints as
-// "+0530 +0530" -- a form the driver then fails to parse back, making
-// the row unreadable.
-//
-// The two text forms differ only after the seconds, and the queries that
-// sort or filter on this text still order imported rows correctly against
-// rows written later. The one exception is a later row stamped with
-// exactly the same instant as an imported one, down to the nanosecond,
-// which would sort before it; a real run can't share an instant with one
-// that was already exported.
-func dbTime(t time.Time) string {
-	return t.Format("2006-01-02 15:04:05.999999999-07:00")
-}
-
 func boolInt(b bool) int {
 	if b {
 		return 1
