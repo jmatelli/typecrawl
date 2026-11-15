@@ -75,3 +75,14 @@ func Apply(out *os.File) {
 		lipgloss.SetColorProfile(termenv.ANSI)
 	}
 }
+
+// UseOutput points the default renderer's colour detection at out, for
+// when the program draws somewhere other than standard output (--json
+// draws to standard error and keeps standard output for its JSON). Left
+// alone, the renderer would look at standard output, find a pipe, and
+// draw everything plain. Call it before Apply.
+func UseOutput(out *os.File) {
+	o := termenv.NewOutput(out)
+	lipgloss.SetColorProfile(o.EnvColorProfile())
+	lipgloss.SetHasDarkBackground(o.HasDarkBackground())
+}

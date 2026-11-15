@@ -57,6 +57,7 @@ On first run you'll be prompted to create a profile. From there:
 - **Weak keys**: `l` cycles the keyboard layout the heatmap is drawn in (QWERTY, AZERTY, QWERTZ,
   Dvorak, Colemak). The choice is saved per profile. Mistyped characters the layout has no key for,
   such as accented letters on QWERTY, are listed in an "other" row below the keyboard.
+- **Results**: `enter` starts another run, `s` shares the run, `q` quits.
 
 Quick-launch flags skip straight to a test:
 
@@ -65,6 +66,50 @@ typecrawl --profile Alice --time 30 --punctuation
 typecrawl --list-profiles
 typecrawl --profile Alice --export backup.json
 ```
+
+### Sharing a run
+
+Press `s` on the results screen to copy a short summary of the run to the clipboard:
+
+```text
+typecrawl · 62.4 WPM · 97.1% accuracy
+time 30s · random words · punctuation
+word streak 14 · level 7 · new personal best
+```
+
+The copy uses the terminal's OSC 52 clipboard sequence, so it also works over SSH, but some terminals
+ignore it without any sign; inside tmux it needs `set -g set-clipboard on`. That's why every run
+you shared is also printed when you quit.
+
+For scripts, `--json` prints each run finished during the session as one JSON object per line on
+standard output when the program exits. The game itself is drawn on standard error, so standard output
+can be piped or redirected:
+
+```sh
+typecrawl --profile Alice --time 30 --json | jq .wpm
+```
+
+```json
+{"profile":"alice","finished_at":"2026-11-15T18:04:05Z","mode":"time","target":30,"source":"random","punctuation":true,"zen":false,"wpm":62.43,"accuracy":97.1,"duration_seconds":30,"words_typed":31,"word_streak":14,"level":7,"xp_gained":58,"new_personal_best":true,"ko":false,"verified":true}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `profile` | profile name |
+| `finished_at` | when the run ended, RFC 3339 |
+| `mode`, `target` | `"time"` with a target in seconds, or `"words"` with a word count |
+| `source` | `"random"` words or `"quotes"` |
+| `punctuation`, `zen` | whether those options were on |
+| `wpm`, `accuracy` | words per minute and accuracy in percent, to two decimals |
+| `duration_seconds` | how long the run took |
+| `words_typed` | words completed |
+| `word_streak` | longest run of mistake-free words |
+| `level`, `xp_gained` | the profile's level after the run, and the XP it earned |
+| `new_personal_best` | whether the run set a personal best |
+| `ko` | whether the run ended in a knockout (no XP) |
+| `verified` | `false` for a run that looked scripted; it earned nothing and was not saved |
+
+A session with no finished run prints nothing.
 
 ### Backup and restore
 

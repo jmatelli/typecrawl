@@ -6,6 +6,7 @@ package app
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -97,6 +98,18 @@ type Model struct {
 	// known terminal width, which isn't available yet at NewWithOptions
 	// time, so the transition is deferred rather than applied immediately.
 	pendingAutoStart *startTypingMsg
+
+	// runs is every run finished this session, oldest first, for --json
+	// and for printing shared summaries on exit (see Runs).
+	runs []sessionRun
+	// clipboard is the terminal the program draws to, where the results
+	// screen's share key sends its OSC 52 sequence. nil disables copying.
+	clipboard io.Writer
+}
+
+type sessionRun struct {
+	summary RunSummary
+	shared  bool // the player pressed the share key on its results screen
 }
 
 // LaunchOptions carries CLI quick-launch parameters (see NewWithOptions),
@@ -109,6 +122,9 @@ type LaunchOptions struct {
 	ZenMode     bool
 	FocusWeak   bool
 	Quotes      bool // draws exercise text from cached quotes instead of random words
+	// Clipboard is the terminal the program draws to, where sharing a run
+	// sends it (see copyToClipboard). nil disables copying.
+	Clipboard io.Writer
 }
 
 // findProfileByName looks up a profile case-insensitively, since CLI flags
@@ -131,6 +147,7 @@ func findProfileByName(profiles []*storage.Profile, name string) *storage.Profil
 // straight past profile selection.
 func NewWithOptions(db *sql.DB, profiles []*storage.Profile, opts LaunchOptions) (Model, error) {
 	m := New(db, profiles)
+	m.clipboard = opts.Clipboard
 	if opts.ProfileName == "" {
 		return m, nil
 	}
@@ -342,6 +359,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// achievement progress.
 			m.results = newResultsModel(msg.result, m.width, resultsExtra{unverified: true})
 			m.state = stateResults
+			run := newRunSummary(m.profile.Name, msg, time.Now())
+			run.Verified = false
+			run.Level = m.profile.Level
+			m.runs = append(m.runs, sessionRun{summary: run})
 			return m, nil
 		}
 
@@ -455,6 +476,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ghostWPMSeries:        msg.ghostWPMSeries,
 		})
 
+		run := newRunSummary(m.profile.Name, msg, now)
+		run.Level = newLevel
+		run.XPGained = baseXP + xpBonus + streakBonusXP + challengeBonusXP
+		run.NewPersonalBest = isNewPB
+		m.runs = append(m.runs, sessionRun{summary: run})
+
 		afterProgress := buildAchievementProgress(m.db, m.profile, streakDays, personalBest)
 		if unlocked := newlyUnlocked(beforeProgress, afterProgress); len(unlocked) > 0 {
 			m.achievementUnlock = newAchievementUnlockModel(unlocked)
@@ -463,6 +490,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateResults
 		}
 		return m, nil
+
+	case shareRunMsg:
+		// The results screen always shows the latest run.
+		if len(m.runs) == 0 {
+			return m, nil
+		}
+		last := &m.runs[len(m.runs)-1]
+		last.shared = true
+		return m, copyToClipboard(m.clipboard, last.summary.Text())
 
 	case continueToResultsMsg:
 		m.state = stateResults
@@ -562,4 +598,26 @@ func (m Model) activeScreenView() string {
 	default:
 		return m.menu.View()
 	}
+}
+
+// Runs returns every run finished this session, oldest first.
+func (m Model) Runs() []RunSummary {
+	out := make([]RunSummary, len(m.runs))
+	for i, r := range m.runs {
+		out[i] = r.summary
+	}
+	return out
+}
+
+// SharedRuns returns the runs the player shared from the results screen,
+// oldest first, each once however many times it was shared. The clipboard
+// copy can fail without notice, so these are printed again on exit.
+func (m Model) SharedRuns() []RunSummary {
+	var out []RunSummary
+	for _, r := range m.runs {
+		if r.shared {
+			out = append(out, r.summary)
+		}
+	}
+	return out
 }

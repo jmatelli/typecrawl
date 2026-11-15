@@ -53,6 +53,7 @@ type resultsModel struct {
 	result stats.Result
 	width  int
 	extra  resultsExtra
+	shared bool // the share key was pressed, so the view says where it went
 }
 
 func newResultsModel(result stats.Result, width int, extra resultsExtra) resultsModel {
@@ -69,6 +70,9 @@ func (m resultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch keyMsg.String() {
 	case "enter", "r":
 		return m, func() tea.Msg { return restartMsg{} }
+	case "s":
+		m.shared = true
+		return m, func() tea.Msg { return shareRunMsg{} }
 	case "q", "ctrl+c", "esc":
 		return m, tea.Quit
 	}
@@ -160,9 +164,7 @@ func (m resultsModel) View() string {
 	}
 	burstGraph := graph.Render("Burst", m.result.BurstSeries, m.result.ErrorWords, graphWidth, 10)
 
-	help := helpStyle.Render("enter: restart   q: quit")
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", statsLine, xpLine, comboLine, streakLine, challengeLine, hpLine, "", wpmGraph, "", burstGraph, "", help)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", statsLine, xpLine, comboLine, streakLine, challengeLine, hpLine, "", wpmGraph, "", burstGraph, "", m.footer())
 }
 
 // unverifiedView renders a flagged run's raw numbers without any of the
@@ -184,7 +186,16 @@ func (m resultsModel) unverifiedView() string {
 	}
 	wpmGraph := graph.Render("WPM over time", m.result.WPMSeries, m.result.ErrorWords, graphWidth, 10)
 	burstGraph := graph.Render("Burst", m.result.BurstSeries, m.result.ErrorWords, graphWidth, 10)
-	help := helpStyle.Render("enter: restart   q: quit")
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", statsLine, warning, "", wpmGraph, "", burstGraph, "", m.footer())
+}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", statsLine, warning, "", wpmGraph, "", burstGraph, "", help)
+// footer is the key help, with a note once the run has been shared. The
+// note doesn't claim the copy worked, since a terminal that ignores the
+// clipboard sequence gives no sign of it.
+func (m resultsModel) footer() string {
+	help := helpStyle.Render("enter: restart   s: share   q: quit")
+	if !m.shared {
+		return help
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, dimStyle.Render("summary sent to the clipboard; it's also printed when you quit"), help)
 }
