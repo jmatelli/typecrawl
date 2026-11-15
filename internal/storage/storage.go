@@ -33,7 +33,10 @@ type Profile struct {
 	// Prestige is how many times the profile went back to level 1 from
 	// PrestigeLevel or above. Each rank raises the word difficulty (see
 	// game.DifficultyLevel). Only PrestigeProfile and ResetProfile change
-	// it; Save leaves it alone, so a stale in-memory profile can't undo it.
+	// it. Save never writes it, and refuses a copy whose rank is out of
+	// date (see ErrStaleProfile), so a profile loaded before a prestige --
+	// in another running copy of the game, say -- can't put the old level
+	// back.
 	Prestige int
 }
 
@@ -1424,12 +1427,37 @@ func PrestigeProfile(db *sql.DB, id int64) (*Profile, error) {
 	return scanProfile(db.QueryRow(`SELECT `+profileColumns+` FROM profiles WHERE id = ?`, id))
 }
 
+// ErrStaleProfile is returned by Save for a profile whose prestige rank
+// no longer matches the database: it was loaded before a prestige or a
+// reset happened elsewhere, and saving it would undo that.
+var ErrStaleProfile = errors.New("profile changed since it was loaded")
+
+// Save writes p's level, XP and records. It writes nothing, and returns
+// ErrStaleProfile, if p's prestige rank is out of date.
 func Save(db *sql.DB, p *Profile) error {
-	_, err := db.Exec(
-		`UPDATE profiles SET level = ?, xp = ?, best_word_streak = ?, ko_count = ?, success_count = ? WHERE id = ?`,
-		p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, p.ID,
+	res, err := db.Exec(
+		`UPDATE profiles SET level = ?, xp = ?, best_word_streak = ?, ko_count = ?, success_count = ? WHERE id = ? AND prestige = ?`,
+		p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, p.ID, p.Prestige,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := LoadProfile(db, p.ID); err != nil {
+			return err // gone altogether
+		}
+		return ErrStaleProfile
+	}
+	return nil
+}
+
+// LoadProfile reads one profile.
+func LoadProfile(db *sql.DB, id int64) (*Profile, error) {
+	return scanProfile(db.QueryRow(`SELECT `+profileColumns+` FROM profiles WHERE id = ?`, id))
 }
 
 func scanProfile(row *sql.Row) (*Profile, error) {

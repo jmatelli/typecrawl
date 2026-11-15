@@ -5,6 +5,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -462,7 +463,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.profile.SuccessCount++
 		}
-		_ = storage.Save(m.db, m.profile) // best-effort; gameplay continues even if the write fails
+		// Best-effort; gameplay continues even if the write fails. A stale
+		// profile (prestiged or reset by another running copy) isn't
+		// written; reload it in place so play continues at its real level.
+		if err := storage.Save(m.db, m.profile); errors.Is(err, storage.ErrStaleProfile) {
+			if fresh, err := storage.LoadProfile(m.db, m.profile.ID); err == nil {
+				*m.profile = *fresh
+			}
+		}
 
 		m.results = newResultsModel(msg.result, m.width, resultsExtra{
 			xpGained:              baseXP + xpBonus + streakBonusXP + challengeBonusXP + weeklyBonusXP,

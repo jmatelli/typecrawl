@@ -42,11 +42,11 @@ func TestPrestigeFromTheProfileScreenSticksAcrossARun(t *testing.T) {
 	}
 
 	m, _ = pressKey(t, m, "p")
-	if !containsSubstring(m.profileView.View(), "press p again to prestige") {
+	if !containsSubstring(m.profileView.View(), "press y to prestige") {
 		t.Fatal("expected a confirmation prompt")
 	}
 	var cmd tea.Cmd
-	m, cmd = pressKey(t, m, "p")
+	m, cmd = pressKey(t, m, "y")
 	if profile.Level != 1 || profile.XP != 0 || profile.Prestige != 1 {
 		t.Fatalf("expected the shared profile at level 1 with prestige 1, got %+v", profile)
 	}
@@ -89,7 +89,7 @@ func TestPrestigeIsRefusedBelowTheLevel(t *testing.T) {
 		t.Fatal("expected no prestige key offered below the prestige level")
 	}
 	m, _ = pressKey(t, m, "p")
-	m, _ = pressKey(t, m, "p")
+	m, _ = pressKey(t, m, "y")
 	if profile.Prestige != 0 || profile.Level != storage.PrestigeLevel-1 {
 		t.Fatalf("expected nothing to change, got %+v", profile)
 	}
@@ -111,5 +111,50 @@ func TestPrestigeRaisesTheWordTierInPlay(t *testing.T) {
 	menu := newMenuModel(profile, m.db)
 	if !containsSubstring(menu.View(), "Difficulty: Medium") || !containsSubstring(menu.View(), "Prestige: ") {
 		t.Fatalf("expected the menu to show Medium words and the prestige rank, got:\n%s", menu.View())
+	}
+}
+
+// p opens the profile from the menu and arms prestige there, so a held or
+// repeated p must never get as far as prestiging.
+func TestRepeatedPDoesNotPrestige(t *testing.T) {
+	m, profile := newTestApp(t)
+	profile.Level = storage.PrestigeLevel
+	if err := storage.Save(m.db, profile); err != nil {
+		t.Fatal(err)
+	}
+	m.menu = newMenuModel(profile, m.db)
+	for range 6 {
+		var cmd tea.Cmd
+		m, cmd = pressKey(t, m, "p")
+		m = runCmd(m, cmd)
+	}
+	if profile.Prestige != 0 || profile.Level != storage.PrestigeLevel {
+		t.Fatalf("expected repeated p not to prestige, got %+v", profile)
+	}
+}
+
+// Another running copy of the game prestiges the profile. This copy's
+// next run must not put the old level back, and it then plays on at the
+// real level and rank.
+func TestStaleProfileIsReloadedNotSaved(t *testing.T) {
+	m, profile := newTestApp(t)
+	profile.Level = storage.PrestigeLevel + 5
+	if err := storage.Save(m.db, profile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.PrestigeProfile(m.db, profile.ID); err != nil { // "elsewhere"
+		t.Fatal(err)
+	}
+	next, _ := m.update(finishTypingMsg{
+		result: stats.Result{WPM: 40, Accuracy: 95, Duration: 30 * time.Second},
+		mode:   modeTime, target: 30, hp: 100, maxHP: 100, wordsTyped: 20,
+	})
+	m = next.(Model)
+	stored, _ := storage.LoadProfile(m.db, profile.ID)
+	if stored.Level != 1 || stored.Prestige != 1 {
+		t.Fatalf("expected the database untouched by the stale save, got level %d prestige %d", stored.Level, stored.Prestige)
+	}
+	if m.profile.Level != 1 || m.profile.Prestige != 1 {
+		t.Fatalf("expected the stale profile reloaded in memory, got %+v", m.profile)
 	}
 }

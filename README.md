@@ -164,7 +164,7 @@ A run counts toward neither challenge if it ended in a knockout or was slower th
 ### Prestige
 
 Word difficulty rises with your level: Medium words from level 10, Hard from 20, Expert from 30. Once a
-profile reaches level 30, press `p` twice on the profile screen to prestige. The profile goes back to
+profile reaches level 30, press `p` on the profile screen, then `y` to confirm. The profile goes back to
 level 1 with no XP and gains a prestige rank, which makes every later climb harder: rank 1 starts on
 Medium words, rank 2 on Hard, and rank 3 or higher on Expert, with the mistake damage of that tier and
 only a level-1 profile's HP growth to absorb it.
