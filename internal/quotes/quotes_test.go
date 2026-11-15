@@ -105,3 +105,47 @@ func TestEndsSentence(t *testing.T) {
 		}
 	}
 }
+
+// Quotes often use typographic punctuation that most keyboards can't
+// type; it has to come out as the ASCII a player would type instead.
+func TestWordsUseTypeablePunctuation(t *testing.T) {
+	pool := []Quote{{ID: 1, Text: "“Don’t stop” — it’s ‘fine’… «really»."}}
+	got := strings.Join(Words(pool, 6), " ")
+	want := `"Don't stop" - it's 'fine'... "really".`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestWordsKeepAccentedLettersAsOneCharacter(t *testing.T) {
+	// Letters outside ASCII are kept: they can be typed, and changing
+	// them would change the quote.
+	if got := Words([]Quote{{ID: 2, Text: "Café déjà vu."}}, 3); strings.Join(got, " ") != "Café déjà vu." {
+		t.Errorf("expected accented letters kept, got %q", got)
+	}
+	// A decomposed "é" (an e followed by a combining accent) becomes the
+	// single character a keyboard sends.
+	got := Words([]Quote{{ID: 3, Text: "cafe\u0301 noir."}}, 2)
+	if got[0] != "caf\u00e9" {
+		t.Errorf("expected the composed é, got %+q", got[0])
+	}
+}
+
+func TestWordsDropInvisibleCharacters(t *testing.T) {
+	got := Words([]Quote{{ID: 4, Text: "foo\u200Bbar soft\u00ADhyphen."}}, 2)
+	if strings.Join(got, " ") != "foobar softhyphen." {
+		t.Errorf("got %+q", got)
+	}
+}
+
+// A quote ending inside its closing quote mark already ends a sentence;
+// adding a period after the mark would leave an odd extra character.
+func TestWordsDontAddAPeriodAfterAClosingQuote(t *testing.T) {
+	for _, text := range []string{"He said “Go.”", "He said (go!)", "Wait…"} {
+		got := Words([]Quote{{ID: 5, Text: text}}, 3)
+		last := got[len(got)-1]
+		if strings.HasSuffix(last, `".`) || strings.HasSuffix(last, ").") || strings.HasSuffix(last, "....") {
+			t.Errorf("%q: got a stray period: %q", text, got)
+		}
+	}
+}

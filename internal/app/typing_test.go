@@ -930,3 +930,49 @@ func TestShieldIndicatorsCarryTheirWordsMarker(t *testing.T) {
 		t.Errorf("expected the blue word's marker on the timed shield, got:\n%s", plain)
 	}
 }
+
+// --- Letters outside ASCII ---
+
+// A quote can contain a letter like "é", which is more than one byte.
+// Typing it correctly must count as correct, and so must every letter
+// after it.
+func TestNonASCIILettersCanBeTypedCorrectly(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"déjà", "vu"}, 100)
+	m = typeString(m, "déjà")
+	if m.hp != 100 || m.wordHasMistake || len(m.charMistakes) != 0 {
+		t.Fatalf("expected no mistake typing déjà correctly, hp %d, mistakes %v", m.hp, m.charMistakes)
+	}
+	if got := m.lettersCut(); got != 4 {
+		t.Errorf("expected the battle strip to have cut all 4 letters, got %d", got)
+	}
+
+	// A wrong letter in place of "é" is attributed to "é".
+	m = newTestTypingModel(modeWords, []string{"déjà", "vu"}, 100)
+	m = typeString(m, "de")
+	if m.charMistakes['é'] != 1 || !m.wordHasMistake {
+		t.Errorf("expected one mistake on é, got %v", m.charMistakes)
+	}
+}
+
+func TestBackspaceRemovesAWholeNonASCIILetter(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"café", "au", "lait"}, 100)
+	m = typeString(m, "café")
+	m = pressBackspace(m)
+	if m.current != "caf" {
+		t.Fatalf("expected backspace to remove é, got %q", m.current)
+	}
+	m = typeString(m, "é")
+	m = pressSpace(m)
+	if m.typedWords[0] != "café" || m.hp != 100 {
+		t.Errorf("expected café typed clean, got %q with hp %d", m.typedWords[0], m.hp)
+	}
+}
+
+func TestWrappingCountsLettersNotBytes(t *testing.T) {
+	// Each word is 4 letters but 8 bytes; three fit in 14 columns.
+	list := []string{"éééé", "éééé", "éééé", "next"}
+	lines, _ := wrapWords(list, 0, 14, 1)
+	if len(lines) != 1 || len(lines[0]) != 3 {
+		t.Errorf("expected three 4-letter words on a 14-column line, got %v", lines)
+	}
+}

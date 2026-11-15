@@ -5,6 +5,7 @@ package stats
 import (
 	"math"
 	"time"
+	"unicode/utf8"
 )
 
 type charEvent struct {
@@ -46,7 +47,7 @@ func (t *Tracker) RecordWordComplete(typed, target string) {
 	t.words = append(t.words, wordRecord{
 		endTime:  time.Now(),
 		hasError: typed != target,
-		chars:    len(target) + 1,
+		chars:    utf8.RuneCountInString(target) + 1,
 	})
 }
 
