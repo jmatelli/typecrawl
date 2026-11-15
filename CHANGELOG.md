@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Special words carry a marker as well as a colour, so they can be told
+  apart without relying on colour: `*` golden, `+` green, `~` blue. The
+  marker stays on the word while it is being typed, and the shield
+  indicators carry the marker of the word that grants them.
+
+### Fixed
+
+- With `NO_COLOR` or `CLICOLOR=0` set, the typing view lost bold, underline and faint text
+  along with the colours, so typed, mistyped and upcoming text all looked
+  the same. Colour is now removed on its own: typed text is bold, mistakes
+  are in reverse video, and upcoming words are faint.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added

@@ -848,3 +848,85 @@ func TestEnsureWordsTimeModeTopsUpFromQuotePoolWhenQuotesMode(t *testing.T) {
 		t.Fatalf("expected ensureWords to top up the quote-sourced word list, stayed at %d", initialLen)
 	}
 }
+
+// --- Non-colour cues for special words ---
+
+// Each special word has to be identifiable with the styling stripped out
+// entirely, which is what a player who can't tell the colours apart, or a
+// terminal that doesn't show them, is left with.
+func TestSpecialWordsAreMarkedWithoutRelyingOnColour(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"alpha", "beta", "gamma", "delta", "omega"}, 100)
+	m.goldenWordIdx, m.greenWordIdx, m.blueWordIdx = 1, 2, 3
+
+	plain := stripANSI(m.View())
+	for _, want := range []string{" alpha", "*beta", "+gamma", "~delta", " omega"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected %q in the view, got:\n%s", want, plain)
+		}
+	}
+
+	// The marker stays while the special word is the one being typed,
+	// when the word itself is no longer drawn in its own colour.
+	m = typeString(m, "alpha")
+	m = pressSpace(m)
+	m = typeString(m, "be")
+	if plain := stripANSI(m.View()); !strings.Contains(plain, "*beta") {
+		t.Errorf("expected the golden marker to stay on the word being typed, got:\n%s", plain)
+	}
+
+	// Once the word is behind the player the marker is gone.
+	m = typeString(m, "ta")
+	m = pressSpace(m)
+	if plain := stripANSI(m.View()); strings.Contains(plain, "*beta") || !strings.Contains(plain, " beta") {
+		t.Errorf("expected no marker on a completed word, got:\n%s", plain)
+	}
+}
+
+// A word can turn special while the player is typing (the green and blue
+// words are earned mid-run). The marker must not move any other text.
+func TestSpecialWordMarkersDoNotShiftTheText(t *testing.T) {
+	wordList := strings.Fields(strings.Repeat("some words that wrap over several lines of text ", 6))
+	m := newTestTypingModel(modeWords, wordList, 100)
+	m.width = 40
+	before := stripANSI(m.View())
+
+	lines, _ := wrapWords(m.wordList, m.pageStart, m.pageWidth(), visibleLines)
+	// First word of a line, last word of a line, and one in the middle.
+	m.goldenWordIdx = lines[1][0]
+	m.greenWordIdx = lines[0][len(lines[0])-1]
+	m.blueWordIdx = lines[2][1]
+	after := stripANSI(m.View())
+
+	if after == before {
+		t.Fatal("expected the markers to appear")
+	}
+	// Blank out only the three cells the markers were put in.
+	unmarked := after
+	for _, marked := range []string{goldenWordMarker + "of text", greenWordMarker + "lines\n", blueWordMarker + "lines of"} {
+		if !strings.Contains(unmarked, marked) {
+			t.Fatalf("expected %q in the view, got:\n%s", marked, after)
+		}
+		unmarked = strings.Replace(unmarked, marked, " "+marked[1:], 1)
+	}
+	if unmarked != before {
+		t.Errorf("markers moved the text:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+	for _, line := range strings.Split(after, "\n") {
+		if len([]rune(line)) > m.width {
+			t.Errorf("line is wider than the %d-column terminal: %q", m.width, line)
+		}
+	}
+}
+
+func TestShieldIndicatorsCarryTheirWordsMarker(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"alpha"}, 100)
+	m.shieldActive = true
+	m.shieldUntil = time.Now().Add(time.Minute)
+	plain := stripANSI(m.View())
+	if !strings.Contains(plain, goldenWordMarker+" shield active") {
+		t.Errorf("expected the golden word's marker on its shield, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, blueWordMarker+" shield ") {
+		t.Errorf("expected the blue word's marker on the timed shield, got:\n%s", plain)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/jmatelli/typecrawl/internal/challenge"
 	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/theme"
 	"github.com/jmatelli/typecrawl/internal/words"
 )
 
@@ -42,10 +43,10 @@ func sourceString(quotes bool) string {
 }
 
 var (
-	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(theme.Color("6"))
 	helpStyle    = lipgloss.NewStyle().Faint(true)
 	boldStyle    = lipgloss.NewStyle().Bold(true)
-	levelUpStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+	levelUpStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.Color("11"))
 )
 
 type menuModel struct {

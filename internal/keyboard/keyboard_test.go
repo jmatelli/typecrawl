@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 func TestRenderWithNoDataStillRendersFullLayout(t *testing.T) {
@@ -27,6 +29,9 @@ func TestRenderHasFourRows(t *testing.T) {
 }
 
 func TestKeyStyleBuckets(t *testing.T) {
+	if theme.NoColor() {
+		t.Skip("NO_COLOR is set, so no key has a colour to check")
+	}
 	cases := []struct {
 		ratio float64
 		color lipgloss.Color

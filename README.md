@@ -79,6 +79,30 @@ imported. Files exported by v0.3.0 or earlier can still be imported, but they la
 counts and daily challenge claims, and every run in them is imported as a random-words run, so progress
 toward the quotes-mode achievements is not restored.
 
+### Special words and colour
+
+Three kinds of special word can appear in a run. Each has its own colour and a marker in front of it, so
+it can be recognised without relying on the colour:
+
+| Marker | Colour | Typed without a mistake                                                   |
+| ------ | ------ | ------------------------------------------------------------------------- |
+| `*`    | gold   | grants a shield that forgives the next mistake                            |
+| `+`    | green  | restores HP                                                               |
+| `~`    | blue   | starts a 5-second shield; appears instead of the green word in a flawless run |
+
+The shield indicators next to the HP bar carry the same markers: `* shield active` and `~ shield 3.2s`.
+
+Set the [`NO_COLOR`](https://no-color.org) environment variable (or `CLICOLOR=0`) to turn colour off
+everywhere:
+
+```sh
+NO_COLOR=1 typecrawl
+```
+
+The typing view then uses bold for what you've typed, reverse video for mistakes, and faint text for
+the words still to come. Views that use colour as a scale, such as the weak-key and activity heatmaps,
+lose that scale.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

@@ -15,6 +15,7 @@ import (
 	"github.com/jmatelli/typecrawl/internal/graph"
 	"github.com/jmatelli/typecrawl/internal/heatmap"
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 // profileDeletedMsg is emitted after deleting the profile being viewed --
@@ -75,7 +76,7 @@ var keycapStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0
 // keycapLetterStyle colors a keycap's letter red like wrongStyle, but
 // without the underline -- which reads as a stray mark sitting on the
 // border directly beneath it rather than as emphasis.
-var keycapLetterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+var keycapLetterStyle = lipgloss.NewStyle().Foreground(theme.Color("1"))
 
 func (m profileViewModel) Init() tea.Cmd { return nil }
 
