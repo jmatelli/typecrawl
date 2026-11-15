@@ -40,6 +40,24 @@ func cellStyle(level int) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(levelColors[level])
 }
 
+// plainGlyphs stand in for levelColors when colour is turned off (see
+// package theme): the same square for every level would say nothing, so
+// each level gets a denser glyph than the one before.
+var plainGlyphs = []string{"·", "░", "▒", "▓", "█"}
+
+// cellGlyph returns the glyph for a day cell at the given level. With
+// colour it is always the same square and the colour carries the level.
+func cellGlyph(level int, plain bool) string {
+	if plain {
+		return plainGlyphs[level]
+	}
+	return "■"
+}
+
+func renderCell(level int) string {
+	return cellStyle(level).Render(cellGlyph(level, theme.NoColor()) + " ")
+}
+
 func levelFor(count int) int {
 	switch {
 	case count <= 0:
@@ -126,7 +144,7 @@ func Render(counts map[string]int, weeks int) string {
 				b.WriteString(strings.Repeat(" ", cellWidth))
 				continue
 			}
-			b.WriteString(cellStyle(c.level).Render("■ "))
+			b.WriteString(renderCell(c.level))
 		}
 		b.WriteString("\n")
 	}
@@ -138,7 +156,7 @@ func Render(counts map[string]int, weeks int) string {
 	fmt.Fprintf(&b, "%d exercises in the last %d weeks   ", total, weeks)
 	b.WriteString(dimStyle.Render("Less "))
 	for _, lvl := range []int{0, 1, 2, 3, 4} {
-		b.WriteString(cellStyle(lvl).Render("■ "))
+		b.WriteString(renderCell(lvl))
 	}
 	b.WriteString(dimStyle.Render("More"))
 

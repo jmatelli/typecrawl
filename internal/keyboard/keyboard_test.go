@@ -50,6 +50,26 @@ func TestKeyStyleBuckets(t *testing.T) {
 	}
 }
 
+// The buckets must differ by more than colour, so the scale is still
+// there with colour turned off or for a player who can't tell the colours
+// apart.
+func TestKeyStyleBucketsDifferWithoutColour(t *testing.T) {
+	type attrs struct{ faint, bold, underline, reverse bool }
+	seen := map[attrs]float64{}
+	for _, ratio := range []float64{0.1, 0.3, 0.6, 0.9} {
+		s := keyStyle(ratio)
+		a := attrs{s.GetFaint(), s.GetBold(), s.GetUnderline(), s.GetReverse()}
+		if other, dup := seen[a]; dup {
+			t.Errorf("keyStyle(%v) and keyStyle(%v) have the same text attributes %+v", ratio, other, a)
+		}
+		seen[a] = ratio
+	}
+	// "No data" is told apart by its gray, or by faint when colour is off.
+	if theme.NoColor() && !keyStyle(0).GetFaint() {
+		t.Error("expected a key with no data to be faint when colour is off")
+	}
+}
+
 func TestRenderNeverPanicsWithEmptyMap(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {

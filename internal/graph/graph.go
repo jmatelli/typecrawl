@@ -12,12 +12,15 @@ import (
 )
 
 var (
-	axisStyle  = lipgloss.NewStyle().Foreground(theme.Color("8"))
-	labelStyle = lipgloss.NewStyle().Foreground(theme.Color("8"))
+	axisStyle  = theme.Pick(lipgloss.NewStyle().Foreground(theme.Color("8")), lipgloss.NewStyle().Faint(true))
+	labelStyle = theme.Pick(lipgloss.NewStyle().Foreground(theme.Color("8")), lipgloss.NewStyle().Faint(true))
 	lineStyle  = lipgloss.NewStyle().Foreground(theme.Color("6"))
 	errorStyle = lipgloss.NewStyle().Foreground(theme.Color("9")).Bold(true)
 	titleStyle = lipgloss.NewStyle().Bold(true)
-	ghostStyle = lipgloss.NewStyle().Foreground(theme.Color("245"))
+	// The ghost is gray next to the player's cyan. Without colour (see
+	// package theme) it is faint instead, so the two curves and their
+	// legend entries still differ.
+	ghostStyle = theme.Pick(lipgloss.NewStyle().Foreground(theme.Color("245")), lipgloss.NewStyle().Faint(true))
 )
 
 // Render draws series (one value per word index) as a smooth braille line
@@ -151,6 +154,6 @@ func RenderCompare(title string, series, ghost []float64, errorX []int, width, h
 		lc.DrawRuneWithStyle(canvas.Float64Point{X: float64(idx), Y: series[idx]}, '●', errorStyle)
 	}
 
-	legend := lineStyle.Render("── you") + "   " + ghostStyle.Render("── ghost (PB)")
+	legend := lineStyle.Render("── you") + "   " + ghostStyle.Render("┄┄ ghost (PB)")
 	return titleStyle.Render(title) + "\n" + lc.View() + "\n" + legend
 }

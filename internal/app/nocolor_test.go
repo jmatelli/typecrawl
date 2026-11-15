@@ -90,10 +90,13 @@ func dumpViews() {
 	fmt.Println("=== results")
 	fmt.Println(newResultsModel(result, 100, resultsExtra{xpGained: 50, isNewPB: true, personalBest: 60, oldLevel: 1, newLevel: 2, levelsGained: 1, hp: 80, maxHP: 100, ghostWPMSeries: []float64{40, 50, 55, 57}}).View())
 
-	fmt.Println("=== packages")
+	fmt.Println("=== graph")
 	fmt.Println(graph.RenderCompare("wpm", []float64{50, 55, 60, 58}, []float64{40, 50, 55, 57}, []int{2}, 60, 8))
+	fmt.Println("=== keyboard")
 	fmt.Println(keyboard.Render(map[rune]int{'a': 1, 's': 3, 'd': 6, 'f': 10}))
+	fmt.Println("=== heatmap")
 	fmt.Println(heatmap.Render(map[string]int{time.Now().Format("2006-01-02"): 5, time.Now().AddDate(0, 0, -1).Format("2006-01-02"): 1}, 8))
+	fmt.Println("=== rest")
 	fmt.Println(avatar.Generate("alice"))
 	for _, tier := range []achievements.Tier{achievements.Bronze, achievements.Silver, achievements.Gold, achievements.Diamond, achievements.Master, achievements.Grandmaster} {
 		fmt.Println(tierStyle(tier).Render("tier"))
@@ -161,6 +164,32 @@ func TestNoColorRemovesEveryColourButKeepsTextAttributes(t *testing.T) {
 				if !strings.Contains(plain, want) {
 					t.Errorf("expected %q in the colourless typing view, got:\n%s", want, plain)
 				}
+			}
+
+			// Views that use colour as a scale keep the scale.
+			section := func(from, to string) string {
+				return out[strings.Index(out, "=== "+from):strings.Index(out, "=== "+to)]
+			}
+			if g := section("graph", "keyboard"); !strings.Contains(g, "\x1b[2m┄┄ ghost (PB)") || strings.Contains(g, "\x1b[2m── you") {
+				t.Errorf("expected the ghost, and only the ghost, to be faint in the graph legend, got:\n%q", g)
+			}
+			kp := sgrParams(section("keyboard", "heatmap"))
+			for name, code := range map[string]int{"bold": 1, "faint": 2, "underline": 4, "reverse": 7} {
+				if !hasParam(kp, code) {
+					t.Errorf("expected the weak-key keyboard to use %s to rank keys", name)
+				}
+			}
+			// Only the grid: the legend below the rule shows every level
+			// whatever the grid does.
+			hm := stripANSI(section("heatmap", "rest"))
+			grid := hm[:strings.Index(hm, "──")]
+			for _, glyph := range []string{"·", "░", "▓"} { // no activity, 1 exercise, 5 exercises
+				if !strings.Contains(grid, glyph) {
+					t.Errorf("expected %q in the activity heatmap's grid, got:\n%s", glyph, grid)
+				}
+			}
+			if strings.Contains(hm, "■") {
+				t.Errorf("expected no same-for-every-level square in the colourless heatmap, got:\n%s", hm)
 			}
 		})
 	}

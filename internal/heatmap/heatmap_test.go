@@ -61,6 +61,24 @@ func TestRenderIncludesLegend(t *testing.T) {
 	}
 }
 
+// Without colour the level has to come from the glyph itself.
+func TestCellGlyphsDifferByLevelWithoutColour(t *testing.T) {
+	seen := map[string]int{}
+	for level := range levelColors {
+		g := cellGlyph(level, true)
+		if len([]rune(g)) != 1 {
+			t.Errorf("level %d: glyph %q is not a single character, which would break the grid", level, g)
+		}
+		if other, dup := seen[g]; dup {
+			t.Errorf("levels %d and %d share the glyph %q", other, level, g)
+		}
+		seen[g] = level
+		if cellGlyph(level, false) != "■" {
+			t.Errorf("level %d: expected the plain square when colour carries the level", level)
+		}
+	}
+}
+
 func TestTruncateToDayZeroesTimeOfDay(t *testing.T) {
 	now := time.Date(2026, 3, 15, 13, 45, 30, 0, time.UTC)
 	got := truncateToDay(now)
