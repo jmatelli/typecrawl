@@ -23,6 +23,23 @@ Download the `.deb` for your architecture from the
 sudo dpkg -i typecrawl_*_linux_amd64.deb
 ```
 
+### Windows
+
+Download the `windows_x86_64.zip` (or `windows_arm64.zip` on ARM) from the
+[latest release](https://github.com/jmatelli/typecrawl/releases/latest), extract it, and run it from
+Windows Terminal:
+
+```powershell
+Expand-Archive typecrawl_*_windows_x86_64.zip -DestinationPath $HOME\typecrawl
+& $HOME\typecrawl\typecrawl.exe
+```
+
+To run `typecrawl` (or `tc`) from any folder, add that folder to your `PATH`. Profiles are stored in
+`%AppData%\typecrawl`.
+
+The binaries aren't code-signed, so the first run may show a SmartScreen warning: choose "More info",
+then "Run anyway".
+
 ### Go install
 
 ```sh

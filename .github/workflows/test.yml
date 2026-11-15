@@ -7,7 +7,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +21,9 @@ jobs:
 
       - run: go build ./...
       - run: go vet ./...
+      # Linux only: a Windows checkout may turn line endings into CRLF,
+      # which gofmt would report on every file.
       - name: gofmt check
+        if: runner.os == 'Linux'
         run: test -z "$(gofmt -l .)"
       - run: go test ./... -cover

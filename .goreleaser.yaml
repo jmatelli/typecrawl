@@ -16,6 +16,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -37,6 +38,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -47,6 +49,11 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    # Windows has no built-in tar.gz support in Explorer, so its archives
+    # are zip files.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -101,3 +108,5 @@ release:
     Install via Homebrew: `brew install jmatelli/typecrawl/typecrawl`
 
     Install via apt (Debian/Ubuntu): download the `.deb` below and run `sudo dpkg -i <file>`
+
+    Install on Windows: download the `windows` `.zip` below, extract it, and run `typecrawl.exe` (or `tc.exe`) from Windows Terminal
