@@ -5,6 +5,26 @@ All notable changes to Typecrawl are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `--import <file>` restores a profile from a file written by `--export`.
+  Add `--profile NAME` to import it under a different name. Import never
+  overwrites or merges into an existing profile, and an invalid file changes
+  nothing.
+
+### Changed
+
+- `--export` now writes a complete backup. As well as the profile, test
+  history and personal bests, the file contains settings, daily activity,
+  weak-key counts, daily challenge claims, and the word source of each run,
+  plus a format `version` field. Files exported by earlier versions can still
+  be imported; they lack settings, weak-key counts and challenge claims, and
+  their quotes-mode runs are imported as random-words runs.
+- In the export file, an empty `history` or `personal_bests` is written as
+  `[]` instead of `null`.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added
@@ -167,6 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Profile stats: WPM and accuracy trends, weak-key heatmap, and test history.
 - GoReleaser configuration for the Homebrew tap and `.deb`/`.rpm` packages.
 
+[Unreleased]: https://github.com/jmatelli/typecrawl/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/jmatelli/typecrawl/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/jmatelli/typecrawl/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/jmatelli/typecrawl/compare/v0.2.2...v0.2.3
