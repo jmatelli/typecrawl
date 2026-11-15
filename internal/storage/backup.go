@@ -100,13 +100,13 @@ type Backup struct {
 }
 
 // MistakeWeight is one character's or key pair's fading mistake weight,
-// as of UpdatedAt. Count, the lifetime count, is only set for pairs:
+// as of WeightAt. Count, the lifetime count, is only set for pairs:
 // a character's is in CharMistakes.
 type MistakeWeight struct {
-	Key       string    `json:"key"`
-	Count     int       `json:"count,omitempty"`
-	Weight    float64   `json:"weight"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Key      string    `json:"key"`
+	Count    int       `json:"count,omitempty"`
+	Weight   float64   `json:"weight"`
+	WeightAt time.Time `json:"weight_at"`
 }
 
 // IsPartial reports whether b predates version 2 and so lacks settings,
@@ -227,7 +227,7 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 		return nil, err
 	}
 
-	err = queryEach(tx, `SELECT char, count, weight, updated_at FROM char_mistakes WHERE profile_id = ? ORDER BY char`, id, func(rows *sql.Rows) error {
+	err = queryEach(tx, `SELECT char, count, weight, weight_at FROM char_mistakes WHERE profile_id = ? ORDER BY char`, id, func(rows *sql.Rows) error {
 		var ch string
 		var count int
 		var w MistakeWeight
@@ -236,7 +236,12 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 			return err
 		}
 		b.CharMistakes[ch] = count
-		w.Key, w.UpdatedAt = ch, time.Unix(since, 0).UTC()
+		if since == 0 {
+			// Written by an older copy of the game running alongside,
+			// after the migration: start it as the migration would.
+			w.Weight, since = float64(count), now.Unix()
+		}
+		w.Key, w.WeightAt = ch, time.Unix(since, 0).UTC()
 		b.WeakKeys = append(b.WeakKeys, w)
 		return nil
 	})
@@ -244,13 +249,13 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 		return nil, err
 	}
 
-	err = queryEach(tx, `SELECT pair, count, weight, updated_at FROM key_pair_mistakes WHERE profile_id = ? ORDER BY pair`, id, func(rows *sql.Rows) error {
+	err = queryEach(tx, `SELECT pair, count, weight, weight_at FROM key_pair_mistakes WHERE profile_id = ? ORDER BY pair`, id, func(rows *sql.Rows) error {
 		var w MistakeWeight
 		var since int64
 		if err := rows.Scan(&w.Key, &w.Count, &w.Weight, &since); err != nil {
 			return err
 		}
-		w.UpdatedAt = time.Unix(since, 0).UTC()
+		w.WeightAt = time.Unix(since, 0).UTC()
 		b.WeakPairs = append(b.WeakPairs, w)
 		return nil
 	})
@@ -430,8 +435,8 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 	// A backup from before mistakes faded starts each count as its
 	// weight, fading from when it was exported.
 	seededAt := b.ExportedAt
-	if seededAt.IsZero() {
-		seededAt = time.Now()
+	if now := time.Now(); seededAt.IsZero() || seededAt.After(now) {
+		seededAt = now
 	}
 	weights := make(map[string]MistakeWeight, len(b.WeakKeys))
 	for _, w := range b.WeakKeys {
@@ -440,16 +445,16 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 	for ch, count := range b.CharMistakes {
 		w, ok := weights[ch]
 		if !ok {
-			w = MistakeWeight{Weight: float64(count), UpdatedAt: seededAt}
+			w = MistakeWeight{Weight: float64(count), WeightAt: seededAt}
 		}
-		if _, err := tx.Exec(`INSERT INTO char_mistakes (profile_id, char, count, weight, updated_at) VALUES (?, ?, ?, ?, ?)`,
-			id, ch, count, w.Weight, w.UpdatedAt.Unix()); err != nil {
+		if _, err := tx.Exec(`INSERT INTO char_mistakes (profile_id, char, count, weight, weight_at) VALUES (?, ?, ?, ?, ?)`,
+			id, ch, count, w.Weight, w.WeightAt.Unix()); err != nil {
 			return nil, err
 		}
 	}
 	for _, w := range b.WeakPairs {
-		if _, err := tx.Exec(`INSERT INTO key_pair_mistakes (profile_id, pair, count, weight, updated_at) VALUES (?, ?, ?, ?, ?)`,
-			id, w.Key, w.Count, w.Weight, w.UpdatedAt.Unix()); err != nil {
+		if _, err := tx.Exec(`INSERT INTO key_pair_mistakes (profile_id, pair, count, weight, weight_at) VALUES (?, ?, ?, ?, ?)`,
+			id, w.Key, w.Count, w.Weight, w.WeightAt.Unix()); err != nil {
 			return nil, err
 		}
 	}
@@ -601,13 +606,18 @@ func (b *Backup) validate() error {
 			return fmt.Errorf("character mistake entry %q is not valid", ch)
 		}
 	}
-	if err := validMistakeWeights(b.WeakKeys, 1, func(w MistakeWeight) bool {
-		_, ok := b.CharMistakes[w.Key]
-		return ok && w.Count == 0
+	// A weight starts at its count and only fades, so it's never above
+	// it; nor is its time after the export.
+	latest := b.ExportedAt.Add(24 * time.Hour)
+	if err := validMistakeWeights(b.WeakKeys, 1, latest, func(w MistakeWeight) bool {
+		count, ok := b.CharMistakes[w.Key]
+		return ok && w.Count == 0 && w.Weight <= float64(count)
 	}); err != nil {
 		return fmt.Errorf("weak key %w", err)
 	}
-	if err := validMistakeWeights(b.WeakPairs, 2, func(w MistakeWeight) bool { return w.Count >= 0 }); err != nil {
+	if err := validMistakeWeights(b.WeakPairs, 2, latest, func(w MistakeWeight) bool {
+		return w.Count >= 0 && w.Weight <= float64(w.Count)
+	}); err != nil {
 		return fmt.Errorf("weak pair %w", err)
 	}
 
@@ -642,13 +652,17 @@ func validWeek(w string) bool {
 	return fmt.Sprintf("%04d-W%02d", year, week) == w && week >= 1 && week <= 53
 }
 
-// validMistakeWeights checks entries keyed by runes-character strings,
-// with a usable weight and time, no key twice, and whatever ok asks.
-func validMistakeWeights(entries []MistakeWeight, runes int, ok func(MistakeWeight) bool) error {
+// validMistakeWeights checks entries keyed by strings of runes visible
+// characters (they're printed on the Weak Keys screen, so no escape
+// sequences), with a usable weight, a time no later than latest, no key
+// twice, and whatever ok asks.
+func validMistakeWeights(entries []MistakeWeight, runes int, latest time.Time, ok func(MistakeWeight) bool) error {
 	seen := make(map[string]bool, len(entries))
 	for i, w := range entries {
 		valid := utf8.ValidString(w.Key) && utf8.RuneCountInString(w.Key) == runes && !seen[w.Key] &&
-			w.Weight >= 0 && !math.IsInf(w.Weight, 0) && !math.IsNaN(w.Weight) && w.UpdatedAt.Unix() > 0 && ok(w)
+			!strings.ContainsFunc(w.Key, func(r rune) bool { return !unicode.IsGraphic(r) }) &&
+			w.Weight >= 0 && !math.IsInf(w.Weight, 0) && !math.IsNaN(w.Weight) &&
+			w.WeightAt.Unix() > 0 && !w.WeightAt.After(latest) && ok(w)
 		if !valid {
 			return fmt.Errorf("%d is not valid", i)
 		}
