@@ -201,7 +201,123 @@ func migrate(db *sql.DB) error {
 	if err := migratePersonalBestsSource(db); err != nil {
 		return err
 	}
-	return addColumnIfMissing(db, "profiles", "equipped_title", "TEXT NOT NULL DEFAULT ''")
+	if err := addColumnIfMissing(db, "profiles", "equipped_title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return repairUnreadableTimestamps(db)
+}
+
+// dbTimeLayout is how every timestamp is stored: SQLite's own text format,
+// keeping the time's UTC offset so the hour of day something happened at
+// survives (the time-of-day achievements depend on it).
+const dbTimeLayout = "2006-01-02 15:04:05.999999999-07:00"
+
+// dbTime formats t for storage. Every timestamp stored by this package
+// must go through it rather than being handed to the driver as a
+// time.Time. (Query bounds that are only compared, as in Summary, are a
+// different matter; see there.)
+//
+// The driver stores a time.Time as t.String() and reads it back with the
+// layout "2006-01-02 15:04:05.999999999 -0700 MST". That fails whenever
+// the zone has no letter abbreviation and String() falls back to the
+// numeric offset, as in "23:15:00 +0545 +0545": Go cannot parse "+0545"
+// as an abbreviation, so the value comes back as a plain string and the
+// row can no longer be scanned into a time.Time. That is the case for
+// several real time zones (Asia/Kathmandu, Asia/Tehran, and others), and
+// for any time decoded from JSON in a zone other than the machine's own.
+//
+// Rows written before this existed are still in the t.String() form
+// ("23:15:00 +0200 CEST"), and several queries sort and filter on this
+// text. The two forms differ only after the seconds, where the old one
+// has a space and the new one "+", "-" or a "." fraction; a space sorts
+// below all of those, so rows at the same UTC offset order by instant
+// whichever form they are in, and at an identical instant the old-form
+// row sorts first. The ordering is by local wall-clock text, though, so
+// rows recorded at different offsets (a DST change, a trip) can misorder
+// around the change, as they always could.
+//
+// Don't run SQLite's date functions (strftime, date, ...) on these
+// columns: they convert to UTC and so lose the local hour, and can't
+// parse old-form rows at all. Scan into a time.Time instead.
+func dbTime(t time.Time) string {
+	return t.Format(dbTimeLayout)
+}
+
+// unreadableTimestampGlob matches the t.String() form the driver cannot
+// parse back: a numeric offset followed by a second numeric offset where
+// the zone abbreviation would be (see dbTime). A two-digit abbreviation
+// such as "+04" does parse, so only the four-digit form is matched. A few
+// four-digit labels ("+0000" to "+0023") happen to parse as well and get
+// rewritten anyway, which is harmless: the instant and offset are kept.
+const unreadableTimestampGlob = "* [+-][0-9][0-9][0-9][0-9] [+-][0-9][0-9][0-9][0-9]*"
+
+// repairUnreadableTimestamps rewrites timestamps stored in the form the
+// driver cannot read back (see dbTime) into dbTimeLayout. Nothing is
+// lost: the stored text holds the full date, time and offset, and only
+// the redundant zone label (and any monotonic-clock suffix) is dropped.
+// Rows in any other form are left exactly as they are.
+func repairUnreadableTimestamps(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, c := range []struct{ table, column string }{
+		{"test_history", "created_at"},
+		{"personal_bests", "achieved_at"},
+		{"daily_challenge_claims", "claimed_at"},
+	} {
+		type fix struct {
+			rowid int64
+			value string
+		}
+		var fixes []fix
+		rows, err := tx.Query(fmt.Sprintf(`SELECT rowid, CAST(%s AS TEXT) FROM %s WHERE CAST(%s AS TEXT) GLOB ?`, c.column, c.table, c.column), unreadableTimestampGlob)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var rowid int64
+			var raw string
+			if err := rows.Scan(&rowid, &raw); err != nil {
+				rows.Close()
+				return err
+			}
+			// A value that matches the pattern but still can't be
+			// parsed is left alone rather than guessed at.
+			if t, ok := parseStringFormTime(raw); ok {
+				fixes = append(fixes, fix{rowid, dbTime(t)})
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+
+		for _, f := range fixes {
+			if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET %s = ? WHERE rowid = ?`, c.table, c.column), f.value, f.rowid); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+// parseStringFormTime parses a time written as t.String() using only its
+// date, time and numeric offset, ignoring the zone label that follows and
+// any " m=..." monotonic-clock suffix.
+func parseStringFormTime(s string) (time.Time, bool) {
+	fields := strings.Fields(s)
+	if len(fields) < 3 {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700", strings.Join(fields[:3], " "))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // migratePersonalBestsSource adds the source column to a personal_bests
@@ -587,7 +703,7 @@ func RecordPersonalBest(db *sql.DB, profileID int64, mode string, target int, so
 			achieved_at      = excluded.achieved_at,
 			ghost_pace       = excluded.ghost_pace,
 			ghost_wpm_series = excluded.ghost_wpm_series
-	`, profileID, mode, target, source, wpm, accuracy, when, serializeGhostPace(ghostPaceMS), serializeFloats(ghostWPMSeries))
+	`, profileID, mode, target, source, wpm, accuracy, dbTime(when), serializeGhostPace(ghostPaceMS), serializeFloats(ghostWPMSeries))
 	if err != nil {
 		return false, err
 	}
@@ -730,7 +846,7 @@ func RecordTestResult(db *sql.DB, profileID int64, wpm, accuracy float64, mode s
 	_, err := db.Exec(`
 		INSERT INTO test_history (profile_id, wpm, accuracy, mode, target, ko, punctuation, zen_mode, source, words_typed, duration_seconds, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, profileID, wpm, accuracy, mode, target, toInt(ko), toInt(punctuation), toInt(zenMode), source, wordsTyped, int(duration.Seconds()), when)
+	`, profileID, wpm, accuracy, mode, target, toInt(ko), toInt(punctuation), toInt(zenMode), source, wordsTyped, int(duration.Seconds()), dbTime(when))
 	return err
 }
 
@@ -769,7 +885,7 @@ func HasClaimedDailyChallenge(db *sql.DB, profileID int64, day string) (bool, er
 // ClaimDailyChallenge records that profileID has claimed the daily
 // challenge bonus for day, so it isn't awarded twice.
 func ClaimDailyChallenge(db *sql.DB, profileID int64, day string, when time.Time) error {
-	_, err := db.Exec(`INSERT OR IGNORE INTO daily_challenge_claims (profile_id, day, claimed_at) VALUES (?, ?, ?)`, profileID, day, when)
+	_, err := db.Exec(`INSERT OR IGNORE INTO daily_challenge_claims (profile_id, day, claimed_at) VALUES (?, ?, ?)`, profileID, day, dbTime(when))
 	return err
 }
 
@@ -834,6 +950,13 @@ type PeriodSummary struct {
 }
 
 // Summary aggregates profileID's activity in [from, to).
+//
+// The bounds are deliberately passed to the driver as time.Time rather
+// than through dbTime. The driver renders them as t.String(), with a
+// space after the seconds, which sorts at or below a stored row for the
+// same second in either stored form (see dbTime). That is what keeps a
+// row exactly at from included and a row exactly at to excluded; a
+// dbTime bound would wrongly drop an old-form row sitting exactly on from.
 func Summary(db *sql.DB, profileID int64, from, to time.Time) (PeriodSummary, error) {
 	var s PeriodSummary
 	if err := db.QueryRow(

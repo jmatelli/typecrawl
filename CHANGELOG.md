@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In the export file, an empty `history` or `personal_bests` is written as
   `[]` instead of `null`.
 
+### Fixed
+
+- Run history, personal bests and daily challenge claims could not be read
+  back in time zones whose abbreviation is a four-digit offset, such as
+  Nepal (`+0545`) and Iran (`+0330`). Timestamps are now stored in a form
+  that reads back in every zone, and rows already saved in the unreadable
+  form are repaired the next time the app starts. No data is lost.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added
