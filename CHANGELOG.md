@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-15
+
 ### Added
 
 - A battle strip below the words: the profile's avatar sword-fights the
@@ -17,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pause isn't counted in the run's time). On by default; `b` in the menu
   turns it off per profile, and it hides itself in terminals smaller than
   70x16.
-
 - Special words carry a marker as well as a colour, so they can be told
   apart without relying on colour: `*` golden, `+` green, `~` blue. The
   marker stays on the word while it is being typed, and the shield
@@ -46,9 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now use the plain ASCII a keyboard can type: `'`, `"`, `-` and `...`.
   Invisible characters that made a word untypeable are removed, and a
   quote ending in a closing quote mark no longer gets an extra period.
-- With `NO_COLOR` or `CLICOLOR=0` set, the typing view lost bold, underline and faint text
-  along with the colours, so typed, mistyped and upcoming text all looked
-  the same. Colour is now removed on its own: typed text is bold, mistakes
+- With `NO_COLOR` or `CLICOLOR=0` set, the typing view lost bold,
+  underline and faint text along with the colours, so typed, mistyped and
+  upcoming text all looked the same. Colour is now removed on its own: typed text is bold, mistakes
   are in reverse video, and upcoming words are faint.
 
 ## [0.4.0] - 2026-11-15
@@ -241,7 +242,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Profile stats: WPM and accuracy trends, weak-key heatmap, and test history.
 - GoReleaser configuration for the Homebrew tap and `.deb`/`.rpm` packages.
 
-[Unreleased]: https://github.com/jmatelli/typecrawl/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jmatelli/typecrawl/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jmatelli/typecrawl/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jmatelli/typecrawl/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jmatelli/typecrawl/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/jmatelli/typecrawl/compare/v0.2.3...v0.2.4
