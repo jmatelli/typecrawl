@@ -173,7 +173,7 @@ func TestExportImportRoundTripPreservesEverything(t *testing.T) {
 		"claimed":        func(db *sql.DB, id int64) (any, error) { return HasClaimedDailyChallenge(db, id, "2026-10-02") },
 		"weekly claimed": func(db *sql.DB, id int64) (any, error) { return HasClaimedWeeklyChallenge(db, id, "2026-W40") },
 		"week totals": func(db *sql.DB, id int64) (any, error) {
-			return WeekTotalsBetween(db, id, asOf.AddDate(0, 0, -7), asOf.AddDate(0, 0, 1))
+			return WeekTotalsBetween(db, id, asOf.AddDate(0, 0, -7), asOf.AddDate(0, 0, 1), 10)
 		},
 		"wpm trend":      func(db *sql.DB, id int64) (any, error) { return RecentWPMHistory(db, id, 10) },
 		"history":        func(db *sql.DB, id int64) (any, error) { return ListTestHistory(db, id, 10) },

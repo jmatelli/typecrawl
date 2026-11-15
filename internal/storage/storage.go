@@ -944,15 +944,16 @@ func ClaimWeeklyChallenge(db *sql.DB, profileID int64, week string, when time.Ti
 }
 
 // WeekTotals is what profileID did in a period, counted over the runs it
-// finished without a knockout. It feeds the weekly challenge.
+// finished without a knockout and at minWPM or faster. It feeds the weekly
+// challenge.
 type WeekTotals struct {
 	Runs, Words, AccurateRuns, QuotesRuns, Seconds, Days int
 }
 
-// WeekTotalsBetween adds up profileID's non-knockout runs in [from, to).
+// WeekTotalsBetween adds up profileID's counting runs in [from, to).
 // The bounds go to the driver as time.Time, for the reason Summary gives.
 // Days counts distinct calendar days as each run recorded them.
-func WeekTotalsBetween(db *sql.DB, profileID int64, from, to time.Time) (WeekTotals, error) {
+func WeekTotalsBetween(db *sql.DB, profileID int64, from, to time.Time, minWPM float64) (WeekTotals, error) {
 	var t WeekTotals
 	err := db.QueryRow(`
 		SELECT COUNT(*),
@@ -962,8 +963,8 @@ func WeekTotalsBetween(db *sql.DB, profileID int64, from, to time.Time) (WeekTot
 		       COALESCE(SUM(duration_seconds), 0),
 		       COUNT(DISTINCT substr(CAST(created_at AS TEXT), 1, 10))
 		FROM test_history
-		WHERE profile_id = ? AND ko = 0 AND created_at >= ? AND created_at < ?
-	`, profileID, from, to).Scan(&t.Runs, &t.Words, &t.AccurateRuns, &t.QuotesRuns, &t.Seconds, &t.Days)
+		WHERE profile_id = ? AND ko = 0 AND wpm >= ? AND created_at >= ? AND created_at < ?
+	`, profileID, minWPM, from, to).Scan(&t.Runs, &t.Words, &t.AccurateRuns, &t.QuotesRuns, &t.Seconds, &t.Days)
 	return t, err
 }
 

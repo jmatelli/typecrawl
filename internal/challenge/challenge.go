@@ -75,9 +75,19 @@ func daily(id string, d Difficulty, description string, check func(Run) bool) Ch
 	return Challenge{ID: id, Description: description, Difficulty: d, XPBonus: d.XP(), check: check}
 }
 
-// Completed reports whether r satisfies c. A knocked-out run never does.
+// MinWPM is the speed below which a run counts toward no challenge.
+// Without it, a time run that's started with one keystroke and then left
+// alone would score full accuracy with no hits.
+const MinWPM = 10
+
+// Counts reports whether r can count toward a challenge at all: it didn't
+// end in a knockout, and some real typing happened.
+func Counts(r Run) bool { return !r.KO && r.WPM >= MinWPM }
+
+// Completed reports whether r satisfies c. A run that doesn't count (see
+// Counts) never does.
 func (c Challenge) Completed(r Run) bool {
-	return !r.KO && c.check(r)
+	return Counts(r) && c.check(r)
 }
 
 // all is the fixed pool Today picks from. Every entry is checkable from a
@@ -142,8 +152,7 @@ func Day(date time.Time) string {
 }
 
 // Week is a profile's progress so far this week, counted over the runs
-// it finished without a knockout (a knockout earns nothing, here as
-// anywhere else).
+// that count toward challenges (see Counts).
 type Week struct {
 	Runs         int // exercises finished
 	Words        int // words typed

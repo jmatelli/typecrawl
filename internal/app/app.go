@@ -644,7 +644,7 @@ func (m Model) SharedRuns() []RunSummary {
 func weeklyStatus(db *sql.DB, profileID int64, now time.Time) (challenge.Weekly, challenge.Week, bool) {
 	c := challenge.ThisWeek(now)
 	start, end := challenge.WeekBounds(now)
-	t, _ := storage.WeekTotalsBetween(db, profileID, start, end)
+	t, _ := storage.WeekTotalsBetween(db, profileID, start, end, challenge.MinWPM)
 	claimed, _ := storage.HasClaimedWeeklyChallenge(db, profileID, challenge.WeekKey(now))
 	return c, challenge.Week{
 		Runs: t.Runs, Words: t.Words, AccurateRuns: t.AccurateRuns,
