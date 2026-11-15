@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 const (
@@ -23,7 +24,7 @@ var palette = []string{"1", "2", "3", "4", "5", "6", "9", "10", "11", "12", "13"
 // single hash-derived color.
 func Generate(seed string) string {
 	sum := sha256.Sum256([]byte(seed))
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(palette[int(sum[0])%len(palette)]))
+	style := lipgloss.NewStyle().Foreground(theme.Color(palette[int(sum[0])%len(palette)]))
 
 	half := gridSize/2 + 1 // generated columns; the rest mirror these
 	var b strings.Builder

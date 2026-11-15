@@ -13,29 +13,44 @@ import (
 	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/stats"
+	"github.com/jmatelli/typecrawl/internal/theme"
 	"github.com/jmatelli/typecrawl/internal/words"
 )
 
 const visibleLines = 3
 
 var (
-	headerStyle  = lipgloss.NewStyle().Bold(true)
-	dimStyle     = lipgloss.NewStyle().Faint(true)
-	correctStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	wrongStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Underline(true)
-	comboStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
-	streakStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	headerStyle = lipgloss.NewStyle().Bold(true)
+	dimStyle    = lipgloss.NewStyle().Faint(true)
+	// correctStyle and wrongStyle mark typed characters. Without colour
+	// (see package theme) they fall back to attributes that still set
+	// three kinds of text apart: typed text is bold, a mistake is in
+	// reverse video, and text still to come is faint.
+	correctStyle = theme.Pick(lipgloss.NewStyle().Foreground(theme.Color("2")), lipgloss.NewStyle().Bold(true))
+	wrongStyle   = theme.Pick(lipgloss.NewStyle().Foreground(theme.Color("1")).Underline(true), lipgloss.NewStyle().Underline(true).Reverse(true))
+	comboStyle   = lipgloss.NewStyle().Foreground(theme.Color("208")).Bold(true)
+	streakStyle  = lipgloss.NewStyle().Foreground(theme.Color("10")).Bold(true)
+	warnStyle    = lipgloss.NewStyle().Foreground(theme.Color("1")).Bold(true)
 	// goldenWordStyle marks a rare word that grants a mistake-forgiving
 	// shield if typed clean. greenWordStyle marks a streak-earned word
 	// that heals if typed clean. blueWordStyle marks the green word's
 	// flawless-run variant, which grants a timed shield instead.
-	goldenWordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
-	greenWordStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
-	blueWordStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	hpHighStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	hpMidStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	hpLowStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	goldenWordStyle = lipgloss.NewStyle().Foreground(theme.Color("220")).Bold(true)
+	greenWordStyle  = lipgloss.NewStyle().Foreground(theme.Color("82")).Bold(true)
+	blueWordStyle   = lipgloss.NewStyle().Foreground(theme.Color("39")).Bold(true)
+	hpHighStyle     = lipgloss.NewStyle().Foreground(theme.Color("2"))
+	hpMidStyle      = lipgloss.NewStyle().Foreground(theme.Color("3"))
+	hpLowStyle      = lipgloss.NewStyle().Foreground(theme.Color("1"))
+)
+
+// Each special word carries a marker as well as a colour, so the three can
+// be told apart by players who can't distinguish the colours and on
+// terminals that don't show them. The same marker labels the shield its
+// word grants. They are plain ASCII so they are one cell wide everywhere.
+const (
+	goldenWordMarker = "*" // grants a shield
+	greenWordMarker  = "+" // heals
+	blueWordMarker   = "~" // grants a timed shield
 )
 
 type tickMsg time.Time
@@ -512,10 +527,13 @@ func (m *typingModel) advancePage() {
 }
 
 func (m typingModel) pageWidth() int {
-	if m.width <= 0 {
-		return 80
+	width := m.width
+	if width <= 0 {
+		width = 80
 	}
-	return m.width
+	// One column is kept for the marker gutter at the start of each line
+	// (see View).
+	return max(width-1, 1)
 }
 
 func (m typingModel) finish() (tea.Model, tea.Cmd) {
@@ -616,16 +634,35 @@ func (m typingModel) View() string {
 		hpLine += "  " + warnStyle.Render(fmt.Sprintf("paste blocked (%d) -- type it out", m.pasteAttempts))
 	}
 	if m.shieldActive {
-		hpLine += "  " + goldenWordStyle.Render("shield active")
+		hpLine += "  " + goldenWordStyle.Render(goldenWordMarker+" shield active")
 	}
 	if remaining := time.Until(m.shieldUntil); remaining > 0 {
-		hpLine += "  " + blueWordStyle.Render(fmt.Sprintf("shield %.1fs", remaining.Seconds()))
+		hpLine += "  " + blueWordStyle.Render(fmt.Sprintf("%s shield %.1fs", blueWordMarker, remaining.Seconds()))
 	}
 
 	lines, _ := wrapWords(m.wordList, m.pageStart, m.pageWidth(), visibleLines)
 	var body strings.Builder
 	for li, line := range lines {
 		for _, idx := range line {
+			// The cell before each word -- the gutter for the first word
+			// on a line, the separating space for the others -- holds
+			// the word's marker if it is a special word. Using a cell
+			// that is already there means a word turning special never
+			// shifts the text after it. The marker stays while the word
+			// is being typed, when the word itself is drawn in the
+			// typed/untyped colours instead of its own.
+			switch {
+			case idx < m.wordIndex:
+				body.WriteString(" ")
+			case idx == m.goldenWordIdx:
+				body.WriteString(goldenWordStyle.Render(goldenWordMarker))
+			case idx == m.greenWordIdx:
+				body.WriteString(greenWordStyle.Render(greenWordMarker))
+			case idx == m.blueWordIdx:
+				body.WriteString(blueWordStyle.Render(blueWordMarker))
+			default:
+				body.WriteString(" ")
+			}
 			switch {
 			case idx < m.wordIndex:
 				body.WriteString(renderWord(m.wordList[idx], m.typedWords[idx]))
@@ -640,7 +677,6 @@ func (m typingModel) View() string {
 			default:
 				body.WriteString(dimStyle.Render(m.wordList[idx]))
 			}
-			body.WriteString(" ")
 		}
 		if li < len(lines)-1 {
 			body.WriteString("\n")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jmatelli/typecrawl/internal/achievements"
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 // viewAchievementsMsg switches from the profile page to the full
@@ -73,17 +74,17 @@ func titleSuffix(equippedID string) string {
 func tierStyle(t achievements.Tier) lipgloss.Style {
 	switch t {
 	case achievements.Bronze:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("130")).Bold(true) // copper/bronze
+		return lipgloss.NewStyle().Foreground(theme.Color("130")).Bold(true) // copper/bronze
 	case achievements.Silver:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("251")).Bold(true) // light gray
+		return lipgloss.NewStyle().Foreground(theme.Color("251")).Bold(true) // light gray
 	case achievements.Gold:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true) // yellow-gold
+		return lipgloss.NewStyle().Foreground(theme.Color("220")).Bold(true) // yellow-gold
 	case achievements.Diamond:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("51")).Bold(true) // bright cyan
+		return lipgloss.NewStyle().Foreground(theme.Color("51")).Bold(true) // bright cyan
 	case achievements.Master:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Bold(true) // purple
+		return lipgloss.NewStyle().Foreground(theme.Color("135")).Bold(true) // purple
 	case achievements.Grandmaster:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("201")).Bold(true) // bright magenta
+		return lipgloss.NewStyle().Foreground(theme.Color("201")).Bold(true) // bright magenta
 	default:
 		return boldStyle
 	}

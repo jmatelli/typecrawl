@@ -13,6 +13,7 @@ import (
 
 	"github.com/jmatelli/typecrawl/internal/app"
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 func findProfileByName(profiles []*storage.Profile, name string) *storage.Profile {
@@ -175,6 +176,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	theme.Apply(os.Stdout)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error running program:", err)

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 var rows = [][]rune{
@@ -25,15 +26,15 @@ var rowIndents = []string{"", " ", "  ", "   "}
 func keyStyle(ratio float64) lipgloss.Style {
 	switch {
 	case ratio <= 0:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // no data: dim gray
+		return lipgloss.NewStyle().Foreground(theme.Color("240")) // no data: dim gray
 	case ratio < 0.25:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+		return lipgloss.NewStyle().Foreground(theme.Color("2")) // green
 	case ratio < 0.5:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // yellow
+		return lipgloss.NewStyle().Foreground(theme.Color("3")) // yellow
 	case ratio < 0.75:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // orange
+		return lipgloss.NewStyle().Foreground(theme.Color("208")) // orange
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
+		return lipgloss.NewStyle().Foreground(theme.Color("1")) // red
 	}
 }
 

@@ -8,15 +8,16 @@ import (
 	"github.com/NimbleMarkets/ntcharts/canvas"
 	"github.com/NimbleMarkets/ntcharts/linechart"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 var (
-	axisStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	lineStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	axisStyle  = lipgloss.NewStyle().Foreground(theme.Color("8"))
+	labelStyle = lipgloss.NewStyle().Foreground(theme.Color("8"))
+	lineStyle  = lipgloss.NewStyle().Foreground(theme.Color("6"))
+	errorStyle = lipgloss.NewStyle().Foreground(theme.Color("9")).Bold(true)
 	titleStyle = lipgloss.NewStyle().Bold(true)
-	ghostStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	ghostStyle = lipgloss.NewStyle().Foreground(theme.Color("245"))
 )
 
 // Render draws series (one value per word index) as a smooth braille line

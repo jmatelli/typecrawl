@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
 const (
@@ -25,12 +26,12 @@ const (
 // for "no activity" reads fine on a light background but nearly vanishes
 // against a dark one, so that level in particular needs its own dark
 // variant rather than one gray for both.
-var levelColors = []lipgloss.AdaptiveColor{
-	{Light: "#ebedf0", Dark: "#484f58"}, // no activity
-	{Light: "#9be9a8", Dark: "#0e4429"},
-	{Light: "#40c463", Dark: "#006d32"},
-	{Light: "#30a14e", Dark: "#26a641"},
-	{Light: "#216e39", Dark: "#39d353"}, // heaviest activity
+var levelColors = []lipgloss.TerminalColor{
+	theme.Adaptive("#ebedf0", "#484f58"), // no activity
+	theme.Adaptive("#9be9a8", "#0e4429"),
+	theme.Adaptive("#40c463", "#006d32"),
+	theme.Adaptive("#30a14e", "#26a641"),
+	theme.Adaptive("#216e39", "#39d353"), // heaviest activity
 }
 
 var dimStyle = lipgloss.NewStyle().Faint(true)
