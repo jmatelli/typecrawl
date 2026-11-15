@@ -21,6 +21,7 @@ import (
 	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/storage"
 	"github.com/jmatelli/typecrawl/internal/textsource"
+	"github.com/jmatelli/typecrawl/internal/words"
 )
 
 // scrollKeyMap restricts the viewport to PgUp/PgDn and Ctrl+U/Ctrl+D
@@ -246,6 +247,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 	source := runSource(msg.quotes, msg.custom)
 	var customWords []string
+	if source.Kind == textsource.Drill {
+		customWords = msg.drillWords
+	}
 	if source.Custom() {
 		// Read when the run starts, so edits to the file show up. A file
 		// that has gone missing since it was saved stops the start here
@@ -258,12 +262,15 @@ func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 		}
 		customWords = loaded
 	}
-	var weakChars map[rune]int
+	var weak words.Weak
 	if msg.focusWeak {
-		weakChars, _ = storage.WeakCharWeights(m.db, m.profile.ID) // best-effort; nil falls back to plain selection
+		// Best-effort; nothing loaded falls back to plain selection.
+		weak.Chars, _ = storage.WeakCharWeights(m.db, m.profile.ID)
+		weak.Pairs, _ = storage.WeakPairWeights(m.db, m.profile.ID)
 	}
 	var ghostPaceMS []int
 	var ghostWPMSeries []float64
+	// A drill keeps no personal best, so has no ghost to race.
 	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(msg.mode), msg.target, source.Key()); err == nil && pb != nil {
 		ghostPaceMS = pb.GhostPace         // best-effort; nil just means no ghost to race
 		ghostWPMSeries = pb.GhostWPMSeries // best-effort; nil just means no ghost curve to overlay on the results graph
@@ -274,9 +281,9 @@ func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 	}
 	m.typing = newTypingModel(
 		msg.mode, msg.target, m.width, game.MaxHP(m.profile.Level, m.profile.Prestige), game.DifficultyLevel(m.profile.Level, m.profile.Prestige),
-		msg.punctuation, msg.zenMode, msg.focusWeak, source.Kind == textsource.Quotes, quotePool, weakChars, ghostPaceMS, ghostWPMSeries,
+		msg.punctuation, msg.zenMode, msg.focusWeak, source.Kind == textsource.Quotes, quotePool, weak, ghostPaceMS, ghostWPMSeries,
 	)
-	if source.Custom() {
+	if source.Practice() {
 		m.typing = m.typing.withCustomSource(source, customWords)
 	}
 	// The battle strip follows the profile's saved setting, so quick
@@ -397,12 +404,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		modeStr := modeString(msg.mode)
 		source := runSource(msg.quotes, msg.custom)
 		sourceStr := source.Key()
-		// A run on the player's own text earns XP and keeps its own
-		// personal bests, but counts toward no achievement or challenge:
-		// a word list can make those trivial. The storage queries behind
-		// them leave such runs out; the profile's own counters are left
-		// alone below.
-		ownText := source.Custom()
+		// A run on the player's own text or a drill earns XP, but counts
+		// toward no achievement or challenge: a word list or a drill of a
+		// few short words can make those trivial. The storage queries
+		// behind them leave such runs out; the profile's own counters are
+		// left alone below. A file keeps its own personal bests; a drill,
+		// different every time, keeps none.
+		ownText := source.Practice()
+		keepsBest := source.Kind != textsource.Drill
 
 		// Snapshot "before" state for the achievement-unlock diff below,
 		// ahead of any mutation this run causes.
@@ -415,7 +424,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		beforeProgress := buildAchievementProgress(m.db, m.profile, beforeDailyStreak, beforeBestWPM)
 
 		_ = storage.RecordActivity(m.db, m.profile.ID, now) // best-effort; shows up on the profile's activity graph
-		_ = storage.RecordCharMistakes(m.db, m.profile.ID, msg.charMistakes)
+		_ = storage.RecordMistakes(m.db, m.profile.ID, msg.charMistakes, msg.pairMistakes, now)
 		_ = storage.RecordTestResult(m.db, m.profile.ID, msg.result.WPM, msg.result.Accuracy, modeStr, msg.target, msg.ko, msg.punctuation, msg.zenMode, sourceStr, msg.wordsTyped, msg.result.Duration, now)
 		streakDays, _ := storage.CurrentStreak(m.db, m.profile.ID, now)
 
@@ -429,7 +438,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				personalBest = pb.WPM
 			}
 		}
-		if !msg.ko {
+		if !msg.ko && keepsBest {
 			var err error
 			isNewPB, err = storage.RecordPersonalBest(m.db, m.profile.ID, modeStr, msg.target, sourceStr, msg.result.WPM, msg.result.Accuracy, msg.result.WordEndOffsetsMS, msg.result.WPMSeries, now)
 			if err == nil {
@@ -540,6 +549,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			weeklyBonusXP:         weeklyBonusXP,
 			weeklyDescription:     weekly.Description,
 			ghostWPMSeries:        msg.ghostWPMSeries,
+			missedWords:           msg.missedWords,
 		})
 
 		run := newRunSummary(m.profile, msg, now)
@@ -577,6 +587,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		last := &m.runs[len(m.runs)-1]
 		last.shared = true
 		return m, copyToClipboard(m.clipboard, last.summary.Text())
+
+	case startDrillMsg:
+		// Same setup as the run just finished, as far as it applies:
+		// zen mode carries over; punctuation is already in the words.
+		var zen bool
+		if len(m.runs) > 0 {
+			zen = m.runs[len(m.runs)-1].summary.Zen
+		}
+		drill := buildDrill(msg.words)
+		return m.startTyping(startTypingMsg{
+			mode: modeWords, target: len(drill), zenMode: zen,
+			custom: textsource.Source{Kind: textsource.Drill}, drillWords: drill,
+		})
 
 	case continueToResultsMsg:
 		m.state = stateResults

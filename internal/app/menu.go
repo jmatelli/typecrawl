@@ -33,11 +33,12 @@ func modeString(m testMode) string {
 }
 
 // runSource is the source a run with these choices types from: the
-// player's own file when one is set, otherwise quotes or random words.
+// player's own file or a drill when one is set, otherwise quotes or
+// random words.
 // Every place that stores or looks up a run's source goes through it, so
 // a personal best is always written and read under the same key.
 func runSource(quotes bool, custom textsource.Source) textsource.Source {
-	if custom.Custom() {
+	if custom.Practice() {
 		return custom
 	}
 	return textsource.Builtin(quotes)

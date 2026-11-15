@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -19,7 +20,8 @@ import (
 // (without each run's source), and personal bests. Version 2 adds
 // everything else a profile owns, so that an export can be imported back
 // without losing anything. Version 3 is version 2 with runs on a player's
-// own word lists or texts, which builds before version 3 can't read.
+// own word lists or texts, or drills, which builds before version 3 can't
+// read.
 //
 // ExportProfile writes version 3 only for a profile that has such runs or
 // saved files, and version 2 otherwise, so a backup an older build can
@@ -88,6 +90,23 @@ type Backup struct {
 	// textsource keys, oldest first. Only the paths travel, not the files.
 	// Absent from backups made before custom sources existed.
 	CustomSources []string `json:"custom_sources,omitempty"`
+	// WeakKeys is each mistyped character's fading weight (see
+	// MistakeHalfLife), one entry per CharMistakes key, and WeakPairs the
+	// same for key pairs, with their lifetime counts. Both are absent from
+	// backups made before mistakes faded; those import with each count as
+	// its starting weight, fading from the export.
+	WeakKeys  []MistakeWeight `json:"weak_keys,omitempty"`
+	WeakPairs []MistakeWeight `json:"weak_pairs,omitempty"`
+}
+
+// MistakeWeight is one character's or key pair's fading mistake weight,
+// as of UpdatedAt. Count, the lifetime count, is only set for pairs:
+// a character's is in CharMistakes.
+type MistakeWeight struct {
+	Key       string    `json:"key"`
+	Count     int       `json:"count,omitempty"`
+	Weight    float64   `json:"weight"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // IsPartial reports whether b predates version 2 and so lacks settings,
@@ -208,13 +227,31 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 		return nil, err
 	}
 
-	err = queryEach(tx, `SELECT char, count FROM char_mistakes WHERE profile_id = ?`, id, func(rows *sql.Rows) error {
+	err = queryEach(tx, `SELECT char, count, weight, updated_at FROM char_mistakes WHERE profile_id = ? ORDER BY char`, id, func(rows *sql.Rows) error {
 		var ch string
 		var count int
-		if err := rows.Scan(&ch, &count); err != nil {
+		var w MistakeWeight
+		var since int64
+		if err := rows.Scan(&ch, &count, &w.Weight, &since); err != nil {
 			return err
 		}
 		b.CharMistakes[ch] = count
+		w.Key, w.UpdatedAt = ch, time.Unix(since, 0).UTC()
+		b.WeakKeys = append(b.WeakKeys, w)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = queryEach(tx, `SELECT pair, count, weight, updated_at FROM key_pair_mistakes WHERE profile_id = ? ORDER BY pair`, id, func(rows *sql.Rows) error {
+		var w MistakeWeight
+		var since int64
+		if err := rows.Scan(&w.Key, &w.Count, &w.Weight, &since); err != nil {
+			return err
+		}
+		w.UpdatedAt = time.Unix(since, 0).UTC()
+		b.WeakPairs = append(b.WeakPairs, w)
 		return nil
 	})
 	if err != nil {
@@ -265,11 +302,12 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 }
 
 // usesCustomSources reports whether b holds anything only version 3 can
-// carry: a saved or selected custom source, or a run or best on one.
+// carry: a saved or selected custom source, or a run or best on one or on
+// a drill.
 func (b *Backup) usesCustomSources() bool {
 	custom := func(key string) bool {
 		src, ok := textsource.Parse(key)
-		return ok && src.Custom()
+		return ok && src.Practice()
 	}
 	if len(b.CustomSources) > 0 || (b.Settings != nil && b.Settings.CustomSource != "") {
 		return true
@@ -389,8 +427,29 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 		}
 	}
 
+	// A backup from before mistakes faded starts each count as its
+	// weight, fading from when it was exported.
+	seededAt := b.ExportedAt
+	if seededAt.IsZero() {
+		seededAt = time.Now()
+	}
+	weights := make(map[string]MistakeWeight, len(b.WeakKeys))
+	for _, w := range b.WeakKeys {
+		weights[w.Key] = w
+	}
 	for ch, count := range b.CharMistakes {
-		if _, err := tx.Exec(`INSERT INTO char_mistakes (profile_id, char, count) VALUES (?, ?, ?)`, id, ch, count); err != nil {
+		w, ok := weights[ch]
+		if !ok {
+			w = MistakeWeight{Weight: float64(count), UpdatedAt: seededAt}
+		}
+		if _, err := tx.Exec(`INSERT INTO char_mistakes (profile_id, char, count, weight, updated_at) VALUES (?, ?, ?, ?, ?)`,
+			id, ch, count, w.Weight, w.UpdatedAt.Unix()); err != nil {
+			return nil, err
+		}
+	}
+	for _, w := range b.WeakPairs {
+		if _, err := tx.Exec(`INSERT INTO key_pair_mistakes (profile_id, pair, count, weight, updated_at) VALUES (?, ?, ?, ?, ?)`,
+			id, w.Key, w.Count, w.Weight, w.UpdatedAt.Unix()); err != nil {
 			return nil, err
 		}
 	}
@@ -513,7 +572,7 @@ func (b *Backup) validate() error {
 	}
 	seen := make(map[bestKey]bool, len(b.PersonalBests))
 	for i, pb := range b.PersonalBests {
-		if !validMode(pb.Mode) || !validSource(pb.Source) || pb.WPM < 0 || pb.Accuracy < 0 || pb.Accuracy > 100 || pb.AchievedAt.IsZero() {
+		if !validMode(pb.Mode) || !validSource(pb.Source) || pb.Source == string(textsource.Drill) || pb.WPM < 0 || pb.Accuracy < 0 || pb.Accuracy > 100 || pb.AchievedAt.IsZero() {
 			return fmt.Errorf("personal best %d is not valid", i)
 		}
 		k := bestKey{pb.Mode, sourceOrDefault(pb.Source), pb.Target}
@@ -541,6 +600,15 @@ func (b *Backup) validate() error {
 		if utf8.RuneCountInString(ch) != 1 || !utf8.ValidString(ch) || count < 0 {
 			return fmt.Errorf("character mistake entry %q is not valid", ch)
 		}
+	}
+	if err := validMistakeWeights(b.WeakKeys, 1, func(w MistakeWeight) bool {
+		_, ok := b.CharMistakes[w.Key]
+		return ok && w.Count == 0
+	}); err != nil {
+		return fmt.Errorf("weak key %w", err)
+	}
+	if err := validMistakeWeights(b.WeakPairs, 2, func(w MistakeWeight) bool { return w.Count >= 0 }); err != nil {
+		return fmt.Errorf("weak pair %w", err)
 	}
 
 	claimed := make(map[string]bool, len(b.ChallengeClaims))
@@ -572,6 +640,21 @@ func validWeek(w string) bool {
 		return false
 	}
 	return fmt.Sprintf("%04d-W%02d", year, week) == w && week >= 1 && week <= 53
+}
+
+// validMistakeWeights checks entries keyed by runes-character strings,
+// with a usable weight and time, no key twice, and whatever ok asks.
+func validMistakeWeights(entries []MistakeWeight, runes int, ok func(MistakeWeight) bool) error {
+	seen := make(map[string]bool, len(entries))
+	for i, w := range entries {
+		valid := utf8.ValidString(w.Key) && utf8.RuneCountInString(w.Key) == runes && !seen[w.Key] &&
+			w.Weight >= 0 && !math.IsInf(w.Weight, 0) && !math.IsNaN(w.Weight) && w.UpdatedAt.Unix() > 0 && ok(w)
+		if !valid {
+			return fmt.Errorf("%d is not valid", i)
+		}
+		seen[w.Key] = true
+	}
+	return nil
 }
 
 func validMode(m string) bool {

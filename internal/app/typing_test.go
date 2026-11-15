@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/jmatelli/typecrawl/internal/words"
+
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +51,7 @@ func pressBackspace(m typingModel) typingModel {
 }
 
 func TestNewTypingModelInitializesHPAndWordList(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 150, 1, false, false, false, false, nil, nil, nil, nil)
+	m := newTypingModel(modeTime, 30, 80, 150, 1, false, false, false, false, nil, words.Weak{}, nil, nil)
 	if m.hp != 150 || m.maxHP != 150 {
 		t.Fatalf("expected hp=maxHP=150, got hp=%d maxHP=%d", m.hp, m.maxHP)
 	}
@@ -277,19 +279,19 @@ func TestTimeModeFinishesWhenElapsedReachesTarget(t *testing.T) {
 }
 
 func TestGhostStatusInactiveBeforeStartOrWithoutGhostData(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, nil, nil)
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, words.Weak{}, nil, nil)
 	if _, active := m.ghostStatus(); active {
 		t.Fatal("expected inactive with no ghost pace at all")
 	}
 
-	m2 := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, []int{500, 1000}, nil)
+	m2 := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, words.Weak{}, []int{500, 1000}, nil)
 	if _, active := m2.ghostStatus(); active {
 		t.Fatal("expected inactive before the run has started (wordIndex still 0)")
 	}
 }
 
 func TestGhostStatusComputesAheadAndBehind(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, []int{1000, 2000, 3000}, nil)
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, words.Weak{}, []int{1000, 2000, 3000}, nil)
 	m.started = true
 	m.wordIndex = 1
 
@@ -318,7 +320,7 @@ func TestGhostStatusComputesAheadAndBehind(t *testing.T) {
 }
 
 func TestFinishCarriesGhostWPMSeriesThrough(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, nil, nil, []float64{40, 55, 60})
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, false, nil, words.Weak{}, nil, []float64{40, 55, 60})
 	m.started = true
 	m.tracker.Start = time.Now().Add(-time.Second)
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // not finish; just confirm field is set on the model
@@ -817,7 +819,7 @@ var testQuotePool = []quotes.Quote{
 }
 
 func TestNewTypingModelQuotesModeDrawsFromQuotePool(t *testing.T) {
-	m := newTypingModel(modeWords, 6, 80, 100, 1, false, false, false, true, testQuotePool, nil, nil, nil)
+	m := newTypingModel(modeWords, 6, 80, 100, 1, false, false, false, true, testQuotePool, words.Weak{}, nil, nil)
 	if len(m.wordList) != 6 {
 		t.Fatalf("expected exactly 6 words, got %d: %v", len(m.wordList), m.wordList)
 	}
@@ -835,14 +837,14 @@ func TestNewTypingModelQuotesModeDrawsFromQuotePool(t *testing.T) {
 }
 
 func TestNewTypingModelQuotesModeForcesPunctuationOn(t *testing.T) {
-	m := newTypingModel(modeWords, 10, 80, 100, 1, false, false, false, true, testQuotePool, nil, nil, nil)
+	m := newTypingModel(modeWords, 10, 80, 100, 1, false, false, false, true, testQuotePool, words.Weak{}, nil, nil)
 	if !m.punctuation {
 		t.Fatal("expected quotes mode to force punctuation on")
 	}
 }
 
 func TestNewTypingModelRandomModeDoesNotUseQuotePool(t *testing.T) {
-	m := newTypingModel(modeWords, 50, 80, 100, 1, false, false, false, false, testQuotePool, nil, nil, nil)
+	m := newTypingModel(modeWords, 50, 80, 100, 1, false, false, false, false, testQuotePool, words.Weak{}, nil, nil)
 	distinctiveQuoteWords := map[string]bool{"alpha": true, "zeta": true, "kappa": true, "theta": true}
 	for _, w := range m.wordList {
 		if distinctiveQuoteWords[strings.ToLower(w)] {
@@ -852,7 +854,7 @@ func TestNewTypingModelRandomModeDoesNotUseQuotePool(t *testing.T) {
 }
 
 func TestEnsureWordsTimeModeTopsUpFromQuotePoolWhenQuotesMode(t *testing.T) {
-	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, true, testQuotePool, nil, nil, nil)
+	m := newTypingModel(modeTime, 30, 80, 100, 1, false, false, false, true, testQuotePool, words.Weak{}, nil, nil)
 	initialLen := len(m.wordList)
 	m.wordIndex = initialLen - 1 // within ensureWords' lookahead threshold
 	m.ensureWords()

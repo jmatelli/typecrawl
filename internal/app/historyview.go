@@ -64,11 +64,12 @@ func (m historyViewModel) View() string {
 		if e.ZenMode {
 			flags = append(flags, "zen")
 		}
-		if src, ok := textsource.Parse(e.Source); ok && src.Kind != textsource.Random {
-			if src.Custom() {
+		if src, ok := textsource.Parse(e.Source); ok {
+			switch {
+			case src.Custom():
 				flags = append(flags, src.FileName())
-			} else {
-				flags = append(flags, "quotes")
+			case src.Kind != textsource.Random:
+				flags = append(flags, string(src.Kind)) // quotes, drill
 			}
 		}
 		flagStr := strings.Join(flags, ",")

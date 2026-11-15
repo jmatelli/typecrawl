@@ -131,39 +131,53 @@ func pickWord(list, recent []string) string {
 	return list[rand.Intn(len(list))] // guarantees termination; vanishingly unlikely to be reached
 }
 
+// Weak is what a player mistypes, for weighting word choice toward it:
+// Chars maps a lowercase character to its mistake weight, and Pairs a
+// lowercase two-character key pair (the character before a mistake and
+// the mistyped one) to its weight.
+type Weak struct {
+	Chars map[rune]int
+	Pairs map[string]int
+}
+
+// Empty reports whether there's nothing to weight toward.
+func (w Weak) Empty() bool {
+	return len(w.Chars) == 0 && len(w.Pairs) == 0
+}
+
 // ForLevelWeak is like ForLevel, but weights word selection toward words
-// containing characters the player mistypes most (weakChars: character ->
-// mistake count), so practice concentrates on real weaknesses instead of
-// pure random chance. It falls back to ForLevel's plain uniform selection
-// when weakChars is empty (nothing learned yet to focus on).
-func ForLevelWeak(n, level int, weakChars map[rune]int, tail ...string) []string {
-	if len(weakChars) == 0 {
+// containing the characters and key pairs the player mistypes most, so
+// practice concentrates on real weaknesses instead of pure random chance.
+// It falls back to ForLevel's plain uniform selection when weak is empty
+// (nothing learned yet to focus on).
+func ForLevelWeak(n, level int, weak Weak, tail ...string) []string {
+	if weak.Empty() {
 		return ForLevel(n, level, tail...)
 	}
-	return FromList(tiers[Tier(level)], n, weakChars, tail...)
+	return FromList(tiers[Tier(level)], n, weak, tail...)
 }
 
 // FromList is ForLevelWeak over a list of the caller's own, such as a
-// player's word list file: n words drawn from list, weighted toward
-// weakChars when it isn't empty, with the same no-repeat window. list
-// must not be empty.
-func FromList(list []string, n int, weakChars map[rune]int, tail ...string) []string {
-	return FromWeighted(list, Weights(list, weakChars), n, tail...)
+// player's word list file: n words drawn from list, weighted toward weak
+// when it isn't empty, with the same no-repeat window. list must not be
+// empty.
+func FromList(list []string, n int, weak Weak, tail ...string) []string {
+	return FromWeighted(list, Weights(list, weak), n, tail...)
 }
 
 // Weights is list's running total of word weights for FromWeighted: each
-// word weighs 1 plus its weak-character score. It's nil when weakChars is
-// empty, meaning every word is equally likely. Working it out once and
-// keeping it saves walking a player's list, which can hold hundreds of
-// thousands of words, every time a run needs more of them.
-func Weights(list []string, weakChars map[rune]int) []int {
-	if len(weakChars) == 0 {
+// word weighs 1 plus its weak score. It's nil when weak is empty, meaning
+// every word is equally likely. Working it out once and keeping it saves
+// walking a player's list, which can hold hundreds of thousands of words,
+// every time a run needs more of them.
+func Weights(list []string, weak Weak) []int {
+	if weak.Empty() {
 		return nil
 	}
 	cumulative := make([]int, len(list))
 	total := 0
 	for i, w := range list {
-		total += 1 + wordWeakScore(w, weakChars)
+		total += 1 + wordWeakScore(w, weak)
 		cumulative[i] = total
 	}
 	return cumulative
@@ -226,12 +240,19 @@ func pickNotRecent(list, recent []string, draw func() string) string {
 // skew practice heavily without making selection degenerate.
 const weakCharCap = 20
 
-// wordWeakScore sums weakChars' (capped) counts for each character in w,
-// so words containing the player's most-mistyped characters score higher.
-func wordWeakScore(w string, weakChars map[rune]int) int {
+// wordWeakScore sums weak's (capped) weights for each character in w and
+// each pair of neighbouring characters, so words containing the player's
+// most-mistyped keys and key pairs score higher. Weights are kept in
+// lowercase, so a capitalized word matches too.
+func wordWeakScore(w string, weak Weak) int {
 	score := 0
-	for _, r := range w {
-		score += min(weakChars[r], weakCharCap)
+	prev := rune(-1)
+	for _, r := range strings.ToLower(w) {
+		score += min(weak.Chars[r], weakCharCap)
+		if prev >= 0 && len(weak.Pairs) > 0 {
+			score += min(weak.Pairs[string([]rune{prev, r})], weakCharCap)
+		}
+		prev = r
 	}
 	return score
 }

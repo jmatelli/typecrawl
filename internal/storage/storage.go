@@ -3,12 +3,15 @@
 package storage
 
 import (
+	"cmp"
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -170,6 +173,14 @@ func migrate(db *sql.DB) error {
 			claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (profile_id, week)
 		);
+		CREATE TABLE IF NOT EXISTS key_pair_mistakes (
+			profile_id INTEGER NOT NULL REFERENCES profiles(id),
+			pair       TEXT NOT NULL,
+			count      INTEGER NOT NULL DEFAULT 0,
+			weight     REAL NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (profile_id, pair)
+		);
 		CREATE TABLE IF NOT EXISTS custom_sources (
 			profile_id INTEGER NOT NULL REFERENCES profiles(id),
 			source     TEXT NOT NULL,
@@ -212,6 +223,9 @@ func migrate(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "settings", "custom_source", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := migrateFadingMistakes(db, time.Now()); err != nil {
+		return err
+	}
 	if err := addColumnIfMissing(db, "test_history", "punctuation", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -243,6 +257,23 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	return repairUnreadableTimestamps(db)
+}
+
+// migrateFadingMistakes adds the fading weight to a char_mistakes table
+// from before mistakes faded. Each existing count becomes the starting
+// weight, as of now, so nothing a player has recorded is lost: it starts
+// fading from the upgrade. updated_at = 0 marks a row not yet migrated,
+// which no row written since can have, so running it again changes
+// nothing.
+func migrateFadingMistakes(db *sql.DB, now time.Time) error {
+	if err := addColumnIfMissing(db, "char_mistakes", "weight", "REAL NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "char_mistakes", "updated_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	_, err := db.Exec(`UPDATE char_mistakes SET weight = count, updated_at = ? WHERE updated_at = 0`, now.Unix())
+	return err
 }
 
 // dbTimeLayout is how every timestamp is stored: SQLite's own text format,
@@ -466,7 +497,7 @@ func ListProfiles(db *sql.DB) ([]*Profile, error) {
 
 // DeleteProfile permanently removes a profile and everything tied to it.
 func DeleteProfile(db *sql.DB, id int64) error {
-	for _, table := range []string{"daily_activity", "settings", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims", "custom_sources"} {
+	for _, table := range []string{"daily_activity", "settings", "personal_bests", "char_mistakes", "key_pair_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims", "custom_sources"} {
 		if _, err := db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE profile_id = ?`, table), id); err != nil {
 			return err
 		}
@@ -484,7 +515,7 @@ func ResetProfile(db *sql.DB, id int64) (*Profile, error) {
 	if _, err := db.Exec(`UPDATE profiles SET level = 1, xp = 0, equipped_title = '', prestige = 0 WHERE id = ?`, id); err != nil {
 		return nil, err
 	}
-	for _, table := range []string{"daily_activity", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims"} {
+	for _, table := range []string{"daily_activity", "personal_bests", "char_mistakes", "key_pair_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims"} {
 		if _, err := db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE profile_id = ?`, table), id); err != nil {
 			return nil, err
 		}
@@ -827,10 +858,35 @@ func BestOverallWPM(db *sql.DB, profileID int64) (*PersonalBest, error) {
 	return &pb, nil
 }
 
-// RecordCharMistakes increments profileID's per-character mistake counters,
-// used to bias later practice toward the player's weakest keys.
+// MistakeHalfLife is how long a recorded mistake takes to count half as
+// much toward a key's weakness: a quarter after twice as long, and so on.
+// It's time rather than a number of runs, so a key fixed months ago drops
+// out however much or little the player has typed since.
+const MistakeHalfLife = 30 * 24 * time.Hour
+
+// fade is weight recorded at the Unix time since, as it counts at now.
+func fade(weight float64, since int64, now time.Time) float64 {
+	age := now.Sub(time.Unix(since, 0))
+	if age <= 0 {
+		return weight
+	}
+	return weight * math.Pow(0.5, float64(age)/float64(MistakeHalfLife))
+}
+
+// RecordCharMistakes records one run's per-character mistake counts at
+// the current time. See RecordMistakes.
 func RecordCharMistakes(db *sql.DB, profileID int64, counts map[rune]int) error {
-	if len(counts) == 0 {
+	return RecordMistakes(db, profileID, counts, nil, time.Now())
+}
+
+// RecordMistakes records one run's mistakes at when: chars maps a
+// character to how often it was mistyped, and pairs a key pair (the
+// character before it and the mistyped one, as a two-character string)
+// to how often a mistake fell on it. Each row keeps the lifetime count
+// and a weight that fades over MistakeHalfLife: the stored weight is
+// brought up to when, then the new mistakes are added to it.
+func RecordMistakes(db *sql.DB, profileID int64, chars map[rune]int, pairs map[string]int, when time.Time) error {
+	if len(chars) == 0 && len(pairs) == 0 {
 		return nil
 	}
 	tx, err := db.Begin()
@@ -838,69 +894,110 @@ func RecordCharMistakes(db *sql.DB, profileID int64, counts map[rune]int) error 
 		return err
 	}
 	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(`
-		INSERT INTO char_mistakes (profile_id, char, count) VALUES (?, ?, ?)
-		ON CONFLICT(profile_id, char) DO UPDATE SET count = count + excluded.count
-	`)
-	if err != nil {
-		return err
+	for r, n := range chars {
+		if err := addMistakes(tx, "char_mistakes", "char", profileID, string(r), n, when); err != nil {
+			return err
+		}
 	}
-	defer stmt.Close()
-
-	for r, n := range counts {
-		if _, err := stmt.Exec(profileID, string(r), n); err != nil {
+	for pair, n := range pairs {
+		if err := addMistakes(tx, "key_pair_mistakes", "pair", profileID, pair, n, when); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// WeakCharWeights returns profileID's per-character mistake counts, for
-// weighting word selection toward characters the player struggles with.
-func WeakCharWeights(db *sql.DB, profileID int64) (map[rune]int, error) {
-	rows, err := db.Query(`SELECT char, count FROM char_mistakes WHERE profile_id = ?`, profileID)
+func addMistakes(tx *sql.Tx, table, column string, profileID int64, key string, n int, when time.Time) error {
+	var weight float64
+	var since int64
+	err := tx.QueryRow(fmt.Sprintf(`SELECT weight, updated_at FROM %s WHERE profile_id = ? AND %s = ?`, table, column), profileID, key).
+		Scan(&weight, &since)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	weight = fade(weight, since, when) + float64(n)
+	_, err = tx.Exec(fmt.Sprintf(`
+		INSERT INTO %[1]s (profile_id, %[2]s, count, weight, updated_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(profile_id, %[2]s) DO UPDATE SET
+			count = count + excluded.count, weight = excluded.weight, updated_at = excluded.updated_at
+	`, table, column), profileID, key, n, weight, when.Unix())
+	return err
+}
+
+// fadedWeights returns each key's mistake weight in table as it counts at
+// now, rounded to whole mistakes. A key that has faded below half a
+// mistake is left out, so it stops counting as weak at all.
+func fadedWeights(db *sql.DB, table, column string, profileID int64, now time.Time) (map[string]int, error) {
+	rows, err := db.Query(fmt.Sprintf(`SELECT %s, weight, updated_at FROM %s WHERE profile_id = ?`, column, table), profileID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	out := make(map[rune]int)
+	out := make(map[string]int)
 	for rows.Next() {
-		var ch string
-		var count int
-		if err := rows.Scan(&ch, &count); err != nil {
+		var key string
+		var weight float64
+		var since int64
+		if err := rows.Scan(&key, &weight, &since); err != nil {
 			return nil, err
 		}
-		if len(ch) > 0 {
-			out[[]rune(ch)[0]] = count
+		if w := int(math.Round(fade(weight, since, now))); w > 0 && key != "" {
+			out[key] = w
 		}
 	}
 	return out, rows.Err()
 }
 
-// TopWeakChars returns up to limit characters with the highest mistake
-// counts, most-mistaken first.
-func TopWeakChars(db *sql.DB, profileID int64, limit int) ([]rune, error) {
-	rows, err := db.Query(`
-		SELECT char FROM char_mistakes WHERE profile_id = ? ORDER BY count DESC LIMIT ?
-	`, profileID, limit)
+// WeakCharWeights returns profileID's per-character mistake weights as
+// they count now (see MistakeHalfLife), for weighting word selection
+// toward characters the player struggles with and for the heatmap.
+func WeakCharWeights(db *sql.DB, profileID int64) (map[rune]int, error) {
+	return WeakCharWeightsAt(db, profileID, time.Now())
+}
+
+// WeakCharWeightsAt is WeakCharWeights as of now.
+func WeakCharWeightsAt(db *sql.DB, profileID int64, now time.Time) (map[rune]int, error) {
+	byKey, err := fadedWeights(db, "char_mistakes", "char", profileID, now)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []rune
-	for rows.Next() {
-		var ch string
-		if err := rows.Scan(&ch); err != nil {
-			return nil, err
-		}
-		if len(ch) > 0 {
-			out = append(out, []rune(ch)[0])
-		}
+	out := make(map[rune]int, len(byKey))
+	for ch, w := range byKey {
+		out[[]rune(ch)[0]] = w
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// WeakPairWeights returns profileID's key-pair mistake weights as they
+// count now, keyed by the two-character pair.
+func WeakPairWeights(db *sql.DB, profileID int64) (map[string]int, error) {
+	return WeakPairWeightsAt(db, profileID, time.Now())
+}
+
+// WeakPairWeightsAt is WeakPairWeights as of now.
+func WeakPairWeightsAt(db *sql.DB, profileID int64, now time.Time) (map[string]int, error) {
+	return fadedWeights(db, "key_pair_mistakes", "pair", profileID, now)
+}
+
+// TopWeakChars returns up to limit characters with the highest mistake
+// weights as they count now, weakest first.
+func TopWeakChars(db *sql.DB, profileID int64, limit int) ([]rune, error) {
+	weights, err := WeakCharWeights(db, profileID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]rune, 0, len(weights))
+	for r := range weights {
+		out = append(out, r)
+	}
+	// Weakest first; ties in character order, so the list is stable.
+	slices.SortFunc(out, func(a, b rune) int {
+		if c := cmp.Compare(weights[b], weights[a]); c != 0 {
+			return c
+		}
+		return cmp.Compare(a, b)
+	})
+	return out[:min(limit, len(out))], nil
 }
 
 // RecordTestResult appends one completed exercise to profileID's history,

@@ -74,8 +74,9 @@ On first run you'll be prompted to create a profile. From there:
   `p` prestige (from level 30), `r` reset, `d` delete.
 - **Weak keys**: `l` cycles the keyboard layout the heatmap is drawn in (QWERTY, AZERTY, QWERTZ,
   Dvorak, Colemak). The choice is saved per profile. Mistyped characters the layout has no key for,
-  such as accented letters on QWERTY, are listed in an "other" row below the keyboard.
-- **Results**: `enter` starts another run, `s` shares the run, `q` quits.
+  such as accented letters on QWERTY, are listed in an "other" row below the keyboard. The weakest key
+  pairs are listed below it.
+- **Results**: `enter` starts another run, `d` drills the words you missed, `s` shares the run, `q` quits.
 
 Quick-launch flags skip straight to a test:
 
@@ -109,6 +110,22 @@ typecrawl --profile Alice --words 200 --text ~/chapter-one.txt      # typed in o
   knockout counts, because a list of very short words would make those trivial. They do count as
   practice for the daily streak.
 
+### Weak keys and drills
+
+Every mistake is recorded against the key you meant to hit, and against the pair it belongs to: the
+key before it and the missed one, such as `th`. The weak-key heatmap, the profile's weakest keys and
+focus-weak mode (`f`, or `--focus-weak`) all use them, and focus-weak favours words holding your weak
+pairs as well as your weak keys.
+
+Mistakes fade, so this reflects how you type now: a mistake counts half as much after 30 days and a
+quarter after 60, and a key you've fixed eventually drops out. Counts recorded before this version
+start fading from the upgrade.
+
+After a run where you missed any words, press `d` on the results screen to drill them. A drill is
+each missed word three times, shuffled, up to 30 words. A word counts as missed if you hit a wrong key
+in it at any point, even one you then fixed, or if you sent it short. Drills earn XP but set no
+personal best and, as with your own text, count toward no achievement or challenge.
+
 ### Sharing a run
 
 Press `s` on the results screen to copy a short summary of the run to the clipboard:
@@ -140,7 +157,7 @@ typecrawl --profile Alice --time 30 --json | jq .wpm
 | `profile` | profile name |
 | `finished_at` | when the run ended, RFC 3339 |
 | `mode`, `target` | `"time"` with a target in seconds, or `"words"` with a word count |
-| `source` | `"random"` words, `"quotes"`, or your own `"wordlist"` or `"text"` |
+| `source` | `"random"` words, `"quotes"`, your own `"wordlist"` or `"text"`, or a `"drill"` |
 | `source_name` | the word list's or text's file name, without its directory; absent for the others |
 | `punctuation`, `zen` | whether those options were on |
 | `wpm`, `accuracy` | words per minute and accuracy in percent, to two decimals |
@@ -158,7 +175,8 @@ A session with no finished run prints nothing.
 ### Backup and restore
 
 `--export` writes everything a profile owns to a JSON file: level and XP, test history, personal bests
-and ghost runs, settings, the daily streak and activity heatmap, weak-key counts, and daily and weekly
+and ghost runs, settings, the daily streak and activity heatmap, weak keys and key pairs (with how far
+they've faded), and daily and weekly
 challenge claims, and your saved word lists and texts. Those are saved by their full path, which
 names your home folder, so the files themselves aren't in the backup. A backup with your own files
 in it needs this version or later to import; older versions say it's a newer format. `--import` creates a new profile from that file, on the same machine or another one:

@@ -45,6 +45,10 @@ type resultsExtra struct {
 	// against, overlaid on the WPM-over-time graph. nil if there was none.
 	ghostWPMSeries []float64
 
+	// missedWords are the words this run got wrong, which d drills. Empty
+	// for a run that missed none, and for an unverified one.
+	missedWords []string
+
 	// unverified marks a run game.IsSuspiciousRun flagged as more likely
 	// scripted/injected input than genuine typing -- its numbers are still
 	// shown, but nothing else in extra is populated, since none of it was
@@ -76,6 +80,10 @@ func (m resultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.shared = true
 		return m, func() tea.Msg { return shareRunMsg{} }
+	case "d":
+		if missed := m.extra.missedWords; len(missed) > 0 {
+			return m, func() tea.Msg { return startDrillMsg{words: missed} }
+		}
 	case "q", "ctrl+c", "esc":
 		return m, tea.Quit
 	}
@@ -203,7 +211,15 @@ func (m resultsModel) unverifiedView() string {
 // note doesn't claim the copy worked, since a terminal that ignores the
 // clipboard sequence gives no sign of it.
 func (m resultsModel) footer() string {
-	help := helpStyle.Render("enter: restart   s: share   q: quit")
+	keys := "enter: restart   s: share   q: quit"
+	if n := len(m.extra.missedWords); n > 0 {
+		plural := "s"
+		if n == 1 {
+			plural = ""
+		}
+		keys = fmt.Sprintf("enter: restart   d: drill the %d word%s you missed   s: share   q: quit", n, plural)
+	}
+	help := helpStyle.Render(keys)
 	if !m.shared {
 		return help
 	}

@@ -12,7 +12,8 @@ type startTypingMsg struct {
 	zenMode     bool
 	focusWeak   bool
 	quotes      bool
-	custom      textsource.Source // a player's word list or text; overrides quotes when set
+	custom      textsource.Source // a player's word list or text, or a drill; overrides quotes when set
+	drillWords  []string          // a drill's words, in order, when custom is a drill
 }
 
 type finishTypingMsg struct {
@@ -25,6 +26,8 @@ type finishTypingMsg struct {
 	mode         testMode
 	target       int
 	charMistakes map[rune]int      // this run's per-character mistake counts
+	pairMistakes map[string]int    // this run's mistakes by key pair (see typingModel.pairMistakes)
+	missedWords  []string          // the words this run got wrong, each once, for a drill
 	hitCount     int               // how many mistakes actually dealt (or would deal) HP damage
 	punctuation  bool              // whether punctuation was enabled this run
 	zenMode      bool              // whether zen mode was enabled this run
@@ -45,6 +48,10 @@ type finishTypingMsg struct {
 type specialWords struct{ golden, green, blue int }
 
 type restartMsg struct{}
+
+// startDrillMsg asks for a drill of words, the ones the run on the results
+// screen missed.
+type startDrillMsg struct{ words []string }
 
 type viewProfileMsg struct{}
 type switchProfileMsg struct{}
