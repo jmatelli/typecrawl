@@ -409,8 +409,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var todayChallenge = challenge.Today(now)
 		if !msg.ko {
 			run := challenge.Run{
-				Mode: modeStr, Target: msg.target, Punctuation: msg.punctuation, ZenMode: msg.zenMode,
+				Mode: modeStr, Target: msg.target, Punctuation: msg.punctuation, ZenMode: msg.zenMode, Quotes: msg.quotes,
 				WPM: msg.result.WPM, Accuracy: msg.result.Accuracy, KO: msg.ko,
+				BestWordStreak: msg.bestCombo, Hits: msg.hitCount,
+				GoldenWords: msg.specialLanded.golden, GreenWords: msg.specialLanded.green, BlueWords: msg.specialLanded.blue,
 			}
 			if todayChallenge.Completed(run) {
 				day := challenge.Day(now)

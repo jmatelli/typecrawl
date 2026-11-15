@@ -126,6 +126,9 @@ type typingModel struct {
 	xpBonus        int          // accumulated XP from the success streak
 	lastKeystroke  time.Time    // when the last rune/space was processed, for the streak's pause check
 	charMistakes   map[rune]int // this run's per-character mistake counts, for weak-key tracking
+	// specialLanded counts the special words landed clean this run, for
+	// the daily challenges that ask for them.
+	specialLanded specialWords
 
 	pasteAttempts int // pasted input events rejected this run -- see the tea.KeyRunes case
 
@@ -486,6 +489,7 @@ func (m *typingModel) completeWord() {
 	if m.wordIndex == m.goldenWordIdx {
 		if !m.wordHasMistake {
 			m.shieldActive = true
+			m.specialLanded.golden++
 			m.lastDrop, m.lastDropStyle = goldenWordMarker+" shield!", goldenWordStyle
 		}
 		m.goldenWordIdx = -1
@@ -493,6 +497,7 @@ func (m *typingModel) completeWord() {
 	if m.wordIndex == m.greenWordIdx {
 		if !m.wordHasMistake {
 			m.hp = min(m.hp+game.GreenWordHealAmount, m.maxHP)
+			m.specialLanded.green++
 			m.lastDrop, m.lastDropStyle = greenWordMarker+" heal!", greenWordStyle
 		}
 		m.greenWordIdx = -1
@@ -500,6 +505,7 @@ func (m *typingModel) completeWord() {
 	if m.wordIndex == m.blueWordIdx {
 		if !m.wordHasMistake {
 			m.shieldUntil = time.Now().Add(game.BlueWordShieldDuration)
+			m.specialLanded.blue++
 			m.lastDrop, m.lastDropStyle = fmt.Sprintf("%s %.0fs shield!", blueWordMarker, game.BlueWordShieldDuration.Seconds()), blueWordStyle
 		}
 		m.blueWordIdx = -1
@@ -625,6 +631,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 		hitCount:    hitCount,
 		punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, wordsTyped: wordsTyped,
 		ghostWPMSeries: ghostWPMSeries,
+		specialLanded:  m.specialLanded,
 	}
 	if ko && m.battleVisible() {
 		// Leave the knocked-out avatar on screen for a moment. The result

@@ -232,7 +232,7 @@ func (m menuModel) View() string {
 	if claimed, _ := storage.HasClaimedDailyChallenge(m.db, m.profile.ID, challenge.Day(time.Now())); claimed {
 		challengeLine = dimStyle.Render(fmt.Sprintf("Daily challenge (complete): %s", today.Description))
 	} else {
-		challengeLine = fmt.Sprintf("Daily challenge: %s   %s", today.Description, streakStyle.Render(fmt.Sprintf("+%d XP", today.XPBonus)))
+		challengeLine = fmt.Sprintf("Daily challenge (%s): %s   %s", today.Difficulty, today.Description, streakStyle.Render(fmt.Sprintf("+%d XP", today.XPBonus)))
 	}
 
 	modeStr := "Time"

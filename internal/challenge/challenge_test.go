@@ -34,12 +34,38 @@ func TestDayFormatsAsCalendarDate(t *testing.T) {
 func TestNoChallengeIsSatisfiedByAKO(t *testing.T) {
 	// A run that maximizes every other field but is KO'd must never
 	// satisfy any challenge in the pool.
-	r := Run{Mode: "time", Target: 999, Punctuation: true, ZenMode: true, WPM: 999, Accuracy: 100, KO: true}
+	maxed := Run{Mode: "time", Target: 120, Punctuation: true, ZenMode: true, Quotes: true, WPM: 999, Accuracy: 100,
+		BestWordStreak: 999, Hits: 0, GoldenWords: 3, GreenWords: 3, BlueWords: 3}
 	for _, c := range all {
-		if c.Completed(r) {
-			t.Fatalf("challenge %q was satisfied by a KO'd run -- every check must require !KO", c.ID)
+		// Each check must pass on some non-KO run, or this test would
+		// pass for the wrong reason.
+		met := false
+		for _, r := range shapes(maxed) {
+			met = met || c.Completed(r)
+		}
+		if !met {
+			t.Fatalf("challenge %q isn't met by any maxed-out run; extend them", c.ID)
+		}
+		for _, r := range shapes(maxed) {
+			r.KO = true
+			if c.Completed(r) {
+				t.Fatalf("challenge %q was satisfied by a KO'd run: %+v", c.ID, r)
+			}
 		}
 	}
+}
+
+// shapes returns r in each mode and target the pool asks for.
+func shapes(r Run) []Run {
+	var out []Run
+	for _, mt := range []struct {
+		mode   string
+		target int
+	}{{"time", 60}, {"time", 120}, {"words", 100}, {"words", 200}} {
+		r.Mode, r.Target = mt.mode, mt.target
+		out = append(out, r)
+	}
+	return out
 }
 
 func TestEachChallengeChecksItsSpecificCondition(t *testing.T) {
@@ -47,7 +73,9 @@ func TestEachChallengeChecksItsSpecificCondition(t *testing.T) {
 	for _, c := range all {
 		byID[c.ID] = c
 	}
-	base := Run{Mode: "time", Target: 30, WPM: 10, Accuracy: 50, KO: false}
+	// base fails every challenge: a short run with hits, low numbers and
+	// no special words.
+	base := Run{Mode: "time", Target: 15, WPM: 10, Accuracy: 50, Hits: 3, BestWordStreak: 2}
 
 	cases := []struct {
 		id      string
@@ -59,6 +87,16 @@ func TestEachChallengeChecksItsSpecificCondition(t *testing.T) {
 		{"wpm_50", func(r Run) Run { r.WPM = 50; return r }},
 		{"words_200", func(r Run) Run { r.Mode, r.Target = "words", 200; return r }},
 		{"time_120", func(r Run) Run { r.Mode, r.Target = "time", 120; return r }},
+		{"quotes_any", func(r Run) Run { r.Quotes = true; return r }},
+		{"quotes_95", func(r Run) Run { r.Quotes, r.Accuracy = true, 95; return r }},
+		{"punct_95", func(r Run) Run { r.Punctuation, r.Accuracy = true, 95; return r }},
+		{"wpm_70", func(r Run) Run { r.WPM = 70; return r }},
+		{"streak_25", func(r Run) Run { r.BestWordStreak = 25; return r }},
+		{"streak_50", func(r Run) Run { r.BestWordStreak = 50; return r }},
+		{"no_hits_30", func(r Run) Run { r.Target, r.Hits = 30, 0; return r }},
+		{"green_word", func(r Run) Run { r.GreenWords = 1; return r }},
+		{"blue_word", func(r Run) Run { r.BlueWords = 1; return r }},
+		{"special_2", func(r Run) Run { r.GoldenWords, r.BlueWords = 1, 1; return r }},
 	}
 	if len(cases) != len(all) {
 		t.Fatalf("test covers %d challenges but the pool has %d -- update this test when the pool changes", len(cases), len(all))
@@ -90,6 +128,51 @@ func TestAllChallengesHaveUniqueIDsAndPositiveBonus(t *testing.T) {
 		}
 		if c.Description == "" {
 			t.Errorf("%s: expected a non-empty description", c.ID)
+		}
+	}
+}
+
+// Near misses: each threshold is checked just below its bar.
+func TestChallengesRejectNearMisses(t *testing.T) {
+	byID := make(map[string]Challenge)
+	for _, c := range all {
+		byID[c.ID] = c
+	}
+	cases := map[string]Run{
+		"quotes_95":  {Mode: "time", Target: 30, Quotes: true, Accuracy: 94.9},
+		"punct_95":   {Mode: "time", Target: 30, Punctuation: true, Accuracy: 94.9},
+		"wpm_70":     {Mode: "time", Target: 30, WPM: 69.9},
+		"streak_50":  {Mode: "time", Target: 30, BestWordStreak: 49},
+		"no_hits_30": {Mode: "time", Target: 30, Hits: 1},
+		"special_2":  {Mode: "time", Target: 30, GoldenWords: 1},
+	}
+	for id, r := range cases {
+		if byID[id].Completed(r) {
+			t.Errorf("%s: a run just short of the bar completed it: %+v", id, r)
+		}
+	}
+	if byID["no_hits_30"].Completed(Run{Mode: "words", Target: 50}) {
+		t.Error("no_hits_30: a words run must not count")
+	}
+}
+
+func TestRewardsDifferByDifficulty(t *testing.T) {
+	if !(Easy.XP() < Medium.XP() && Medium.XP() < Hard.XP()) {
+		t.Fatalf("expected easy < medium < hard, got %d, %d, %d", Easy.XP(), Medium.XP(), Hard.XP())
+	}
+	seen := map[Difficulty]bool{}
+	for _, c := range all {
+		if c.XPBonus != c.Difficulty.XP() {
+			t.Errorf("%s: XPBonus %d doesn't match its difficulty's %d", c.ID, c.XPBonus, c.Difficulty.XP())
+		}
+		seen[c.Difficulty] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("expected the pool to use all three difficulties, got %v", seen)
+	}
+	for d, want := range map[Difficulty]string{Easy: "easy", Medium: "medium", Hard: "hard"} {
+		if d.String() != want {
+			t.Errorf("Difficulty(%d).String() = %q, want %q", d, d.String(), want)
 		}
 	}
 }
