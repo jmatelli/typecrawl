@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1249,5 +1250,54 @@ func TestResetAndDeleteClearWeeklyClaims(t *testing.T) {
 	}
 	if claimed, _ := HasClaimedWeeklyChallenge(db, p.ID, "2026-W46"); claimed {
 		t.Fatal("expected delete to clear weekly claims")
+	}
+}
+
+// --- Prestige ---
+
+func TestPrestigeProfile(t *testing.T) {
+	db, p := newTestDB(t)
+	p.Level, p.XP, p.BestWordStreak = PrestigeLevel-1, 500, 40
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(Save(db, p))
+	must(SetEquippedTitle(db, p.ID, "wpm_60"))
+	if _, err := PrestigeProfile(db, p.ID); !errors.Is(err, ErrCannotPrestige) {
+		t.Fatalf("expected a level %d profile refused, got %v", p.Level, err)
+	}
+
+	p.Level = PrestigeLevel + 4
+	must(Save(db, p))
+	got, err := PrestigeProfile(db, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Level != 1 || got.XP != 0 || got.Prestige != 1 || got.BestWordStreak != 40 || got.EquippedTitle != "wpm_60" {
+		t.Fatalf("expected level 1, no XP, prestige 1 and the records kept, got %+v", got)
+	}
+	// A second press, now at level 1, does nothing.
+	if _, err := PrestigeProfile(db, p.ID); !errors.Is(err, ErrCannotPrestige) {
+		t.Fatalf("expected the second prestige refused, got %v", err)
+	}
+
+	// Save writes the level from memory but never the prestige rank.
+	stale := *got
+	stale.Prestige = 0
+	must(Save(db, &stale))
+	profiles, _ := ListProfiles(db)
+	if profiles[0].Prestige != 1 {
+		t.Fatalf("expected Save to leave prestige alone, got %d", profiles[0].Prestige)
+	}
+
+	reset, err := ResetProfile(db, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset.Prestige != 0 {
+		t.Fatalf("expected reset to clear prestige, got %d", reset.Prestige)
 	}
 }

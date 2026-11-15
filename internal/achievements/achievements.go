@@ -10,6 +10,7 @@ import "sort"
 // Progress bundles the stats achievements are evaluated against.
 type Progress struct {
 	Level          int
+	Prestige       int // times the profile went back to level 1 from level 30
 	TotalExercises int // successful (non-KO) exercises completed -- a knockout doesn't count as "complete"
 	BestWordStreak int
 	KOCount        int
@@ -98,6 +99,19 @@ func numericProgress(get func(Progress) float64, min float64) func(Progress) (fl
 	return func(p Progress) (float64, float64, bool) { return get(p), min, true }
 }
 
+// prestigeLevel is the level a profile prestiges from (storage.PrestigeLevel).
+const prestigeLevel = 30
+
+// levelReached is the highest level the profile has reached: once it has
+// prestiged, it reached prestigeLevel at least, whatever its level now.
+// The level achievements use it, so prestiging doesn't take them away.
+func levelReached(p Progress) int {
+	if p.Prestige > 0 {
+		return max(p.Level, prestigeLevel)
+	}
+	return p.Level
+}
+
 // All is the full, fixed list of achievements, grouped by theme with tiers
 // rising within each group.
 var All = []Achievement{
@@ -121,17 +135,26 @@ var All = []Achievement{
 		progress: numericProgress(func(p Progress) float64 { return float64(p.TotalExercises) }, 500)},
 
 	{ID: "level_5", Name: "Getting Somewhere", Description: "Reach level 5", Tier: Bronze,
-		check:    func(p Progress) bool { return p.Level >= 5 },
-		progress: numericProgress(func(p Progress) float64 { return float64(p.Level) }, 5)},
+		check:    func(p Progress) bool { return levelReached(p) >= 5 },
+		progress: numericProgress(func(p Progress) float64 { return float64(levelReached(p)) }, 5)},
 	{ID: "level_10", Name: "Medium Difficulty", Description: "Reach level 10 and unlock Medium words", Tier: Silver,
-		check:    func(p Progress) bool { return p.Level >= 10 },
-		progress: numericProgress(func(p Progress) float64 { return float64(p.Level) }, 10)},
+		check:    func(p Progress) bool { return levelReached(p) >= 10 },
+		progress: numericProgress(func(p Progress) float64 { return float64(levelReached(p)) }, 10)},
 	{ID: "level_20", Name: "Hard Difficulty", Description: "Reach level 20 and unlock Hard words", Tier: Gold,
-		check:    func(p Progress) bool { return p.Level >= 20 },
-		progress: numericProgress(func(p Progress) float64 { return float64(p.Level) }, 20)},
+		check:    func(p Progress) bool { return levelReached(p) >= 20 },
+		progress: numericProgress(func(p Progress) float64 { return float64(levelReached(p)) }, 20)},
 	{ID: "level_30", Name: "Expert Difficulty", Description: "Reach level 30 and unlock Expert words", Tier: Diamond,
-		check:    func(p Progress) bool { return p.Level >= 30 },
-		progress: numericProgress(func(p Progress) float64 { return float64(p.Level) }, 30)},
+		check:    func(p Progress) bool { return levelReached(p) >= 30 },
+		progress: numericProgress(func(p Progress) float64 { return float64(levelReached(p)) }, 30)},
+	{ID: "prestige_1", Name: "Born Again", Description: "Prestige once: go back to level 1 from level 30", Tier: Diamond,
+		check:    func(p Progress) bool { return p.Prestige >= 1 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.Prestige) }, 1)},
+	{ID: "prestige_3", Name: "Expert From Day One", Description: "Prestige 3 times, to type Expert words from level 1", Tier: Master,
+		check:    func(p Progress) bool { return p.Prestige >= 3 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.Prestige) }, 3)},
+	{ID: "prestige_5", Name: "Eternal Return", Description: "Prestige 5 times", Tier: Grandmaster,
+		check:    func(p Progress) bool { return p.Prestige >= 5 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.Prestige) }, 5)},
 
 	{ID: "wpm_30", Name: "30 WPM Club", Description: "Hit 30 WPM in a test", Tier: Bronze,
 		check:    func(p Progress) bool { return p.BestWPM >= 30 },

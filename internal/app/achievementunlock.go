@@ -19,17 +19,19 @@ type continueToResultsMsg struct{}
 // actually unlocked something new -- it's skipped entirely otherwise.
 type achievementUnlockModel struct {
 	unlocked []achievements.Achievement
+	then     tea.Msg // sent when dismissed; continueToResultsMsg after a run
 }
 
 func newAchievementUnlockModel(unlocked []achievements.Achievement) achievementUnlockModel {
-	return achievementUnlockModel{unlocked: unlocked}
+	return achievementUnlockModel{unlocked: unlocked, then: continueToResultsMsg{}}
 }
 
 func (m achievementUnlockModel) Init() tea.Cmd { return nil }
 
 func (m achievementUnlockModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyMsg); ok {
-		return m, func() tea.Msg { return continueToResultsMsg{} }
+		then := m.then
+		return m, func() tea.Msg { return then }
 	}
 	return m, nil
 }

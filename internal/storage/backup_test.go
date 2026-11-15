@@ -45,6 +45,10 @@ func seedFullProfile(t *testing.T, db *sql.DB) *Profile {
 	must(Save(db, p))
 	must(SetEquippedTitle(db, p.ID, "wpm_60"))
 	p.EquippedTitle = "wpm_60"
+	if _, err := db.Exec(`UPDATE profiles SET prestige = 2 WHERE id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	p.Prestige = 2
 
 	must(SaveSettings(db, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, Punctuation: true, Quotes: true, HideBattleStrip: true, KeyboardLayout: "azerty"}))
 
@@ -283,6 +287,7 @@ func TestImportProfileRejectsInvalidBackupsAndChangesNothing(t *testing.T) {
 		"overlong name":          func(b *Backup) { b.Profile.Name = strings.Repeat("é", maxBackupNameLength+1) },
 		"level zero":             func(b *Backup) { b.Profile.Level = 0 },
 		"negative xp":            func(b *Backup) { b.Profile.XP = -1 },
+		"negative prestige":      func(b *Backup) { b.Profile.Prestige = -1 },
 		"control char in title":  func(b *Backup) { b.Profile.EquippedTitle = "\x07" },
 		"unknown settings mode":  func(b *Backup) { b.Settings.Mode = "sprint" },
 		"control char in layout": func(b *Backup) { b.Settings.KeyboardLayout = "dvorak\x1b[2J" },

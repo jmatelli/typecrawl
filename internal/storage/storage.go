@@ -30,7 +30,18 @@ type Profile struct {
 	// achievement it names must still be independently unlocked to be
 	// worth anything (see the app package's title-cycling logic).
 	EquippedTitle string
+	// Prestige is how many times the profile went back to level 1 from
+	// PrestigeLevel or above. Each rank raises the word difficulty (see
+	// game.DifficultyLevel). Only PrestigeProfile and ResetProfile change
+	// it; Save leaves it alone, so a stale in-memory profile can't undo it.
+	Prestige int
 }
+
+// PrestigeLevel is the level a profile must reach to prestige.
+const PrestigeLevel = 30
+
+// profileColumns is every profiles column, in scanProfile's order.
+const profileColumns = `id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title, prestige`
 
 // userDataDir returns the OS's conventional base directory for per-user
 // application data. On Linux this follows the XDG Base Directory spec's
@@ -214,6 +225,9 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := addColumnIfMissing(db, "profiles", "equipped_title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "profiles", "prestige", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	return repairUnreadableTimestamps(db)
@@ -421,7 +435,7 @@ func addColumnIfMissing(db *sql.DB, table, column, def string) error {
 
 // ListProfiles returns every profile, ordered by creation order.
 func ListProfiles(db *sql.DB) ([]*Profile, error) {
-	rows, err := db.Query(`SELECT id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title FROM profiles ORDER BY id`)
+	rows, err := db.Query(`SELECT ` + profileColumns + ` FROM profiles ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +444,7 @@ func ListProfiles(db *sql.DB) ([]*Profile, error) {
 	var out []*Profile
 	for rows.Next() {
 		var p Profile
-		if err := rows.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle, &p.Prestige); err != nil {
 			return nil, err
 		}
 		out = append(out, &p)
@@ -449,11 +463,12 @@ func DeleteProfile(db *sql.DB, id int64) error {
 	return err
 }
 
-// ResetProfile resets a profile's level, XP, activity history, personal
-// bests, weak-key stats, and test history back to the starting values,
-// keeping its name and its all-time records (best word streak, KO count).
+// ResetProfile resets a profile's level, XP, prestige, activity history,
+// personal bests, weak-key stats, and test history back to the starting
+// values, keeping its name and its all-time records (best word streak, KO
+// count). Prestige is progress, like the level, so it goes too.
 func ResetProfile(db *sql.DB, id int64) (*Profile, error) {
-	if _, err := db.Exec(`UPDATE profiles SET level = 1, xp = 0, equipped_title = '' WHERE id = ?`, id); err != nil {
+	if _, err := db.Exec(`UPDATE profiles SET level = 1, xp = 0, equipped_title = '', prestige = 0 WHERE id = ?`, id); err != nil {
 		return nil, err
 	}
 	for _, table := range []string{"daily_activity", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims"} {
@@ -461,7 +476,7 @@ func ResetProfile(db *sql.DB, id int64) (*Profile, error) {
 			return nil, err
 		}
 	}
-	row := db.QueryRow(`SELECT id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title FROM profiles WHERE id = ?`, id)
+	row := db.QueryRow(`SELECT `+profileColumns+` FROM profiles WHERE id = ?`, id)
 	return scanProfile(row)
 }
 
@@ -1371,7 +1386,7 @@ func CreateProfile(db *sql.DB, name string) (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := db.QueryRow(`SELECT id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title FROM profiles WHERE id = ?`, id)
+	row := db.QueryRow(`SELECT `+profileColumns+` FROM profiles WHERE id = ?`, id)
 	return scanProfile(row)
 }
 
@@ -1387,6 +1402,28 @@ func SetEquippedTitle(db *sql.DB, profileID int64, title string) error {
 	return err
 }
 
+// ErrCannotPrestige is returned by PrestigeProfile for a profile below
+// PrestigeLevel.
+var ErrCannotPrestige = errors.New("profile is below the prestige level")
+
+// PrestigeProfile sends a profile at PrestigeLevel or above back to level 1
+// with no XP and one more prestige rank, keeping everything else: history,
+// personal bests, streaks, achievements and the equipped title. The level
+// is checked in the same statement, so pressing it twice can't prestige a
+// profile that is already back at level 1.
+func PrestigeProfile(db *sql.DB, id int64) (*Profile, error) {
+	res, err := db.Exec(`UPDATE profiles SET level = 1, xp = 0, prestige = prestige + 1 WHERE id = ? AND level >= ?`, id, PrestigeLevel)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, ErrCannotPrestige
+	}
+	return scanProfile(db.QueryRow(`SELECT `+profileColumns+` FROM profiles WHERE id = ?`, id))
+}
+
 func Save(db *sql.DB, p *Profile) error {
 	_, err := db.Exec(
 		`UPDATE profiles SET level = ?, xp = ?, best_word_streak = ?, ko_count = ?, success_count = ? WHERE id = ?`,
@@ -1397,7 +1434,7 @@ func Save(db *sql.DB, p *Profile) error {
 
 func scanProfile(row *sql.Row) (*Profile, error) {
 	var p Profile
-	if err := row.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle, &p.Prestige); err != nil {
 		return nil, err
 	}
 	return &p, nil
