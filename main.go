@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -40,6 +41,7 @@ func main() {
 	quotesFlag := flag.Bool("quotes", false, "quick-launch: use quotes instead of random words (implies punctuation; requires --time or --words)")
 	listProfilesFlag := flag.Bool("list-profiles", false, "list saved profiles and exit")
 	exportFlag := flag.String("export", "", "export a profile to this JSON file path and exit (requires --profile)")
+	jsonFlag := flag.Bool("json", false, "print each finished run as a line of JSON on standard output when the program exits (the game is drawn on standard error)")
 	importFlag := flag.String("import", "", "import a profile from a JSON file written by --export and exit (add --profile to import it under a different name)")
 	var showVersion bool
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
@@ -74,6 +76,11 @@ func main() {
 	}
 	if *importFlag != "" && (*exportFlag != "" || hasMode || *listProfilesFlag) {
 		fmt.Fprintln(os.Stderr, "error: --import cannot be combined with --export, --list-profiles, --time or --words")
+		os.Exit(1)
+	}
+
+	if *jsonFlag && (*exportFlag != "" || *importFlag != "" || *listProfilesFlag) {
+		fmt.Fprintln(os.Stderr, "error: --json cannot be combined with --export, --import or --list-profiles")
 		os.Exit(1)
 	}
 
@@ -161,7 +168,14 @@ func main() {
 		return
 	}
 
-	opts := app.LaunchOptions{ProfileName: *profileFlag, Punctuation: *punctuationFlag, ZenMode: *zenFlag, FocusWeak: *focusWeakFlag, Quotes: *quotesFlag}
+	// With --json, standard output carries only the JSON, so the game is
+	// drawn on standard error instead.
+	screen := os.Stdout
+	if *jsonFlag {
+		screen = os.Stderr
+	}
+
+	opts := app.LaunchOptions{ProfileName: *profileFlag, Punctuation: *punctuationFlag, ZenMode: *zenFlag, FocusWeak: *focusWeakFlag, Quotes: *quotesFlag, Clipboard: screen}
 	if *timeFlag != 0 {
 		opts.Mode = "time"
 		opts.Target = *timeFlag
@@ -176,10 +190,45 @@ func main() {
 		os.Exit(1)
 	}
 
-	theme.Apply(os.Stdout)
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	if screen != os.Stdout {
+		theme.UseOutput(screen)
+	}
+	theme.Apply(screen)
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(screen))
+	final, err := p.Run()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error running program:", err)
 		os.Exit(1)
 	}
+	if fm, ok := final.(app.Model); ok {
+		if err := writeExitOutput(os.Stdout, screen, fm.Runs(), fm.SharedRuns(), *jsonFlag); err != nil {
+			fmt.Fprintln(os.Stderr, "error writing results:", err)
+			os.Exit(1)
+		}
+	}
+}
+
+// writeExitOutput prints what's left once the game has closed: with
+// asJSON, every finished run as one JSON object per line on stdout; and
+// the text summary of each run the player shared, on screen (the stream
+// the game was drawn on), since the clipboard copy may not have worked.
+func writeExitOutput(stdout, screen io.Writer, runs, shared []app.RunSummary, asJSON bool) error {
+	for i, r := range shared {
+		if i > 0 {
+			fmt.Fprintln(screen)
+		}
+		if _, err := fmt.Fprintln(screen, r.Text()); err != nil {
+			return err
+		}
+	}
+	if !asJSON {
+		return nil
+	}
+	enc := json.NewEncoder(stdout)
+	for _, r := range runs {
+		if err := enc.Encode(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
