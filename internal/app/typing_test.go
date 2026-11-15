@@ -425,6 +425,9 @@ func TestGoldenWordGrantsShieldOnlyWhenLandedClean(t *testing.T) {
 	if m.goldenWordIdx != -1 {
 		t.Fatal("expected goldenWordIdx consumed (reset to -1) after landing it")
 	}
+	if m.specialLanded != (specialWords{golden: 1}) {
+		t.Fatalf("expected one golden word counted as landed, got %+v", m.specialLanded)
+	}
 }
 
 func TestGoldenWordMissedGrantsNoShield(t *testing.T) {
@@ -434,6 +437,9 @@ func TestGoldenWordMissedGrantsNoShield(t *testing.T) {
 	m = pressSpace(m)
 	if m.shieldActive {
 		t.Fatal("expected a missed golden word to NOT activate the shield")
+	}
+	if m.specialLanded != (specialWords{}) {
+		t.Fatalf("expected a missed golden word not counted, got %+v", m.specialLanded)
 	}
 	if m.goldenWordIdx != -1 {
 		t.Fatal("expected the golden word opportunity consumed even when missed")
@@ -498,6 +504,9 @@ func TestGreenWordAppearsTwoWordsAheadAndHealsOnCleanCompletion(t *testing.T) {
 	if m.hp != 50+game.GreenWordHealAmount {
 		t.Fatalf("expected hp=%d after healing, got %d", 50+game.GreenWordHealAmount, m.hp)
 	}
+	if m.specialLanded != (specialWords{green: 1}) {
+		t.Fatalf("expected one green word counted as landed, got %+v", m.specialLanded)
+	}
 	if m.greenWordIdx != -1 {
 		t.Fatal("expected the green word opportunity consumed after landing it")
 	}
@@ -554,6 +563,9 @@ func TestGreenWordMissedGrantsNoHeal(t *testing.T) {
 	}
 	if m.greenWordIdx != -1 {
 		t.Fatal("expected the green word opportunity consumed even when missed")
+	}
+	if m.specialLanded.green != 0 {
+		t.Fatalf("expected a missed green word not counted, got %+v", m.specialLanded)
 	}
 }
 
@@ -974,5 +986,36 @@ func TestWrappingCountsLettersNotBytes(t *testing.T) {
 	lines, _ := wrapWords(list, 0, 14, 1)
 	if len(lines) != 1 || len(lines[0]) != 3 {
 		t.Errorf("expected three 4-letter words on a 14-column line, got %v", lines)
+	}
+}
+
+func TestBlueWordLandedIsCounted(t *testing.T) {
+	m := newTestTypingModel(modeWords, greenWordTestWordList(20), 100)
+	for i := 0; i < game.GreenWordStreakInterval; i++ { // flawless, so blue
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.blueWordIdx == -1 {
+		t.Fatal("expected a blue word after a flawless streak")
+	}
+	for m.wordIndex <= game.GreenWordStreakInterval+1 {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.specialLanded.blue != 1 {
+		t.Fatalf("expected one blue word counted as landed, got %+v", m.specialLanded)
+	}
+}
+
+func TestFinishCarriesLandedSpecialWords(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"cat"}, 100)
+	m.specialLanded = specialWords{golden: 1, green: 2, blue: 3}
+	_, cmd := m.finish()
+	msg, ok := cmd().(finishTypingMsg)
+	if !ok {
+		t.Fatal("expected finish to send finishTypingMsg")
+	}
+	if msg.specialLanded != m.specialLanded {
+		t.Fatalf("expected the landed counts carried over, got %+v", msg.specialLanded)
 	}
 }

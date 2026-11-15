@@ -32,7 +32,12 @@ type finishTypingMsg struct {
 	// for the results screen to overlay on its own graph. nil means there
 	// was no ghost to race.
 	ghostWPMSeries []float64
+
+	specialLanded specialWords // special words landed clean this run
 }
+
+// specialWords counts golden, green and blue words.
+type specialWords struct{ golden, green, blue int }
 
 type restartMsg struct{}
 
