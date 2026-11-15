@@ -89,7 +89,14 @@ func (m profileViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key := keyMsg.String()
 
 	if m.confirm != "" {
-		confirmed := key == m.confirm
+		// Prestige is confirmed with y rather than a second p: p also
+		// opens this screen from the menu, so holding it down would
+		// otherwise open, arm and confirm in one go.
+		confirmKey := m.confirm
+		if m.confirm == "p" {
+			confirmKey = "y"
+		}
+		confirmed := key == confirmKey
 		action := m.confirm
 		m.confirm = ""
 		if !confirmed {
@@ -312,7 +319,7 @@ func (m profileViewModel) View() string {
 		))
 		if m.confirm == "p" {
 			confirmLine = wrongStyle.Render(fmt.Sprintf(
-				"press p again to prestige %q: back to level 1, with %s words from the start; any other key cancels",
+				"press y to prestige %q: back to level 1, with %s words from the start; any other key cancels",
 				m.profile.Name, words.TierName(words.Tier(game.DifficultyLevel(1, m.profile.Prestige+1))),
 			))
 		}

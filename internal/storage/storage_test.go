@@ -1284,10 +1284,13 @@ func TestPrestigeProfile(t *testing.T) {
 		t.Fatalf("expected the second prestige refused, got %v", err)
 	}
 
-	// Save writes the level from memory but never the prestige rank.
+	// Save never writes the prestige rank, and refuses a copy whose rank
+	// is out of date.
 	stale := *got
 	stale.Prestige = 0
-	must(Save(db, &stale))
+	if err := Save(db, &stale); !errors.Is(err, ErrStaleProfile) {
+		t.Fatalf("expected ErrStaleProfile, got %v", err)
+	}
 	profiles, _ := ListProfiles(db)
 	if profiles[0].Prestige != 1 {
 		t.Fatalf("expected Save to leave prestige alone, got %d", profiles[0].Prestige)
@@ -1299,5 +1302,33 @@ func TestPrestigeProfile(t *testing.T) {
 	}
 	if reset.Prestige != 0 {
 		t.Fatalf("expected reset to clear prestige, got %d", reset.Prestige)
+	}
+}
+
+// A copy loaded before a prestige can't save the old level back, and so
+// can't be used to prestige again without climbing.
+func TestStaleCopyCannotUndoPrestige(t *testing.T) {
+	db, p := newTestDB(t)
+	p.Level = PrestigeLevel + 5
+	if err := Save(db, p); err != nil {
+		t.Fatal(err)
+	}
+	stale := *p // loaded before the prestige
+	if _, err := PrestigeProfile(db, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale.Level = PrestigeLevel + 6
+	if err := Save(db, &stale); !errors.Is(err, ErrStaleProfile) {
+		t.Fatalf("expected ErrStaleProfile, got %v", err)
+	}
+	got, _ := LoadProfile(db, p.ID)
+	if got.Level != 1 || got.Prestige != 1 {
+		t.Fatalf("expected level 1 and prestige 1 kept, got %+v", got)
+	}
+	if _, err := PrestigeProfile(db, p.ID); !errors.Is(err, ErrCannotPrestige) {
+		t.Fatalf("expected no second prestige without climbing, got %v", err)
+	}
+	if err := Save(db, got); err != nil {
+		t.Fatalf("expected an up-to-date copy to save, got %v", err)
 	}
 }
