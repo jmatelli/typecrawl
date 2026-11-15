@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
 ### Added
 
 - `--import <file>` restores a profile from a file written by `--export`.
@@ -195,7 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Profile stats: WPM and accuracy trends, weak-key heatmap, and test history.
 - GoReleaser configuration for the Homebrew tap and `.deb`/`.rpm` packages.
 
-[Unreleased]: https://github.com/jmatelli/typecrawl/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jmatelli/typecrawl/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jmatelli/typecrawl/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jmatelli/typecrawl/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/jmatelli/typecrawl/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/jmatelli/typecrawl/compare/v0.2.2...v0.2.3
