@@ -108,7 +108,7 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 
 	// Read inside the transaction, not passed in, so the level and XP
 	// can't be older than the history they're exported with.
-	profile, err := scanProfile(tx.QueryRow(`SELECT id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title FROM profiles WHERE id = ?`, id))
+	profile, err := scanProfile(tx.QueryRow(`SELECT `+profileColumns+` FROM profiles WHERE id = ?`, id))
 	if err != nil {
 		return nil, err
 	}
@@ -284,9 +284,9 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 		createdAt = time.Now()
 	}
 	res, err := tx.Exec(`
-		INSERT INTO profiles (name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, name, p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, dbTime(createdAt), p.EquippedTitle)
+		INSERT INTO profiles (name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title, prestige)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, name, p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, dbTime(createdAt), p.EquippedTitle, p.Prestige)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +351,7 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 		}
 	}
 
-	imported, err := scanProfile(tx.QueryRow(`SELECT id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title FROM profiles WHERE id = ?`, id))
+	imported, err := scanProfile(tx.QueryRow(`SELECT `+profileColumns+` FROM profiles WHERE id = ?`, id))
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +418,7 @@ func (b *Backup) validate() error {
 	}
 
 	p := b.Profile
-	if p.Level < 1 || p.XP < 0 || p.BestWordStreak < 0 || p.KOCount < 0 || p.SuccessCount < 0 {
+	if p.Level < 1 || p.XP < 0 || p.BestWordStreak < 0 || p.KOCount < 0 || p.SuccessCount < 0 || p.Prestige < 0 {
 		return errors.New("profile has a level below 1 or a negative counter")
 	}
 	if strings.ContainsFunc(p.EquippedTitle, unicode.IsControl) {

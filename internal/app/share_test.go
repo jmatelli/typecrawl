@@ -34,7 +34,7 @@ var sampleRun = RunSummary{
 
 // sampleRunJSON is the example line in the README's --json section. If
 // this test fails because the format changed on purpose, update both.
-const sampleRunJSON = `{"profile":"alice","finished_at":"2026-11-15T18:04:05Z","mode":"time","target":30,"source":"random","punctuation":true,"zen":false,"wpm":62.43,"accuracy":97.1,"duration_seconds":30,"words_typed":31,"word_streak":14,"level":7,"xp_gained":58,"new_personal_best":true,"ko":false,"verified":true}`
+const sampleRunJSON = `{"profile":"alice","finished_at":"2026-11-15T18:04:05Z","mode":"time","target":30,"source":"random","punctuation":true,"zen":false,"wpm":62.43,"accuracy":97.1,"duration_seconds":30,"words_typed":31,"word_streak":14,"level":7,"prestige":0,"xp_gained":58,"new_personal_best":true,"ko":false,"verified":true}`
 
 func TestRunSummaryJSONMatchesREADME(t *testing.T) {
 	got, err := json.Marshal(sampleRun)
@@ -66,6 +66,8 @@ func TestRunSummaryText(t *testing.T) {
 		}, "typecrawl · 62.4 WPM · 97.1% accuracy\nwords 50 · quotes · zen\nword streak 14 · level 7"},
 		{"knockout", func(s *RunSummary) { s.KO, s.NewPersonalBest = true, false },
 			"typecrawl · 62.4 WPM · 97.1% accuracy\ntime 30s · random words · punctuation\nword streak 14 · level 7 · knocked out"},
+		{"prestiged", func(s *RunSummary) { s.Prestige, s.NewPersonalBest = 2, false },
+			"typecrawl · 62.4 WPM · 97.1% accuracy\ntime 30s · random words · punctuation\nword streak 14 · level 7 · prestige 2"},
 		{"unverified", func(s *RunSummary) { s.Verified = false },
 			"typecrawl · 62.4 WPM · 97.1% accuracy\ntime 30s · random words · punctuation\nunverified run"},
 	}

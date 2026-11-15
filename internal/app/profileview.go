@@ -16,6 +16,7 @@ import (
 	"github.com/jmatelli/typecrawl/internal/heatmap"
 	"github.com/jmatelli/typecrawl/internal/storage"
 	"github.com/jmatelli/typecrawl/internal/theme"
+	"github.com/jmatelli/typecrawl/internal/words"
 )
 
 // profileDeletedMsg is emitted after deleting the profile being viewed --
@@ -35,7 +36,7 @@ type profileViewModel struct {
 	accuracyHistory []float64
 	weekSummary     storage.PeriodSummary
 	monthSummary    storage.PeriodSummary
-	confirm         string // "", "d", or "r" -- the armed action awaiting confirmation
+	confirm         string // "", "d", "r" or "p" -- the armed action awaiting confirmation
 	errMsg          string
 }
 
@@ -118,6 +119,20 @@ func (m profileViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.accuracyHistory = nil
 			m.weekSummary = storage.PeriodSummary{}
 			m.monthSummary = storage.PeriodSummary{}
+		case "p":
+			before := m.achievementProgress()
+			updated, err := storage.PrestigeProfile(m.db, m.profile.ID)
+			if err != nil {
+				m.errMsg = "couldn't prestige profile"
+				return m, nil
+			}
+			// In place, as for reset: the root model saves this same
+			// profile after every run, so a stale copy there would write
+			// the old level back.
+			*m.profile = *updated
+			if unlocked := newlyUnlocked(before, m.achievementProgress()); len(unlocked) > 0 {
+				return m, func() tea.Msg { return prestigedMsg{unlocked: unlocked} }
+			}
 		}
 		return m, nil
 	}
@@ -142,6 +157,13 @@ func (m profileViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 	case "r":
 		m.confirm = "r"
+		m.errMsg = ""
+	case "p":
+		if m.profile.Level < storage.PrestigeLevel {
+			m.errMsg = fmt.Sprintf("prestige unlocks at level %d", storage.PrestigeLevel)
+			return m, nil
+		}
+		m.confirm = "p"
 		m.errMsg = ""
 	case "ctrl+c":
 		return m, tea.Quit
@@ -174,9 +196,9 @@ func (m profileViewModel) View() string {
 	progress := m.achievementProgress()
 	stats := lipgloss.JoinVertical(lipgloss.Left,
 		fmt.Sprintf("Name:         %s%s", boldStyle.Render(m.profile.Name), titleSuffix(m.profile.EquippedTitle)),
-		fmt.Sprintf("Level:        %s", boldStyle.Render(fmt.Sprintf("%d", m.profile.Level))),
+		fmt.Sprintf("Level:        %s%s", boldStyle.Render(fmt.Sprintf("%d", m.profile.Level)), prestigeSuffix(m.profile.Prestige)),
 		fmt.Sprintf("XP:           %s", boldStyle.Render(fmt.Sprintf("%d/%d", m.profile.XP, needed))),
-		fmt.Sprintf("Max HP:       %s", boldStyle.Render(fmt.Sprintf("%d", game.MaxHP(m.profile.Level)))),
+		fmt.Sprintf("Max HP:       %s", boldStyle.Render(fmt.Sprintf("%d", game.MaxHP(m.profile.Level, m.profile.Prestige)))),
 		bestWPMLine,
 		fmt.Sprintf("Daily streak: %s", streakStyle.Render(fmt.Sprintf("%d day(s)", m.streakDays))),
 		fmt.Sprintf("Best streak:  %s", streakStyle.Render(fmt.Sprintf("%d mistake-free words", m.profile.BestWordStreak))),
@@ -288,6 +310,12 @@ func (m profileViewModel) View() string {
 		confirmLine = wrongStyle.Render(fmt.Sprintf(
 			"press %s again to %s %q, any other key cancels", m.confirm, action, m.profile.Name,
 		))
+		if m.confirm == "p" {
+			confirmLine = wrongStyle.Render(fmt.Sprintf(
+				"press p again to prestige %q: back to level 1, with %s words from the start; any other key cancels",
+				m.profile.Name, words.TierName(words.Tier(game.DifficultyLevel(1, m.profile.Prestige+1))),
+			))
+		}
 	}
 
 	var errLine string
@@ -295,7 +323,11 @@ func (m profileViewModel) View() string {
 		errLine = wrongStyle.Render(m.errMsg)
 	}
 
-	help := helpStyle.Render("esc: back to menu   a: achievements   h: history   k: weak keys   t: cycle title   r: reset   d: delete   ctrl+c: quit")
+	prestigeHelp := ""
+	if m.profile.Level >= storage.PrestigeLevel {
+		prestigeHelp = "p: prestige   "
+	}
+	help := helpStyle.Render("esc: back to menu   a: achievements   h: history   k: weak keys   t: cycle title   " + prestigeHelp + "r: reset   d: delete   ctrl+c: quit")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -350,4 +382,18 @@ func successRateSuffix(successes, kos int) string {
 	}
 	rate := float64(successes) / float64(total) * 100
 	return dimStyle.Render(fmt.Sprintf("  (%.0f%% success rate)", rate))
+}
+
+// prestigedMsg reports a prestige that unlocked achievements, so the root
+// model can show them before going back to the profile.
+type prestigedMsg struct {
+	unlocked []achievements.Achievement
+}
+
+// prestigeSuffix is shown after the level once a profile has prestiged.
+func prestigeSuffix(prestige int) string {
+	if prestige <= 0 {
+		return ""
+	}
+	return "   Prestige: " + levelUpStyle.Render(fmt.Sprintf("%d", prestige))
 }

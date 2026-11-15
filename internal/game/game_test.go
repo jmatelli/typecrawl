@@ -1,6 +1,7 @@
 package game
 
 import (
+	"github.com/jmatelli/typecrawl/internal/words"
 	"testing"
 	"time"
 
@@ -20,16 +21,16 @@ func TestMaxHPGrowsPerLevelAndJumpsAtTierTransitions(t *testing.T) {
 		{40, BaseMaxHP + 39*HPPerLevel + 3*TierTransitionHPBonus}, // tier stays capped at 3
 	}
 	for _, c := range cases {
-		if got := MaxHP(c.level); got != c.want {
+		if got := MaxHP(c.level, 0); got != c.want {
 			t.Errorf("MaxHP(%d) = %d, want %d", c.level, got, c.want)
 		}
 	}
 }
 
 func TestMaxHPStrictlyIncreasesWithLevel(t *testing.T) {
-	prev := MaxHP(1)
+	prev := MaxHP(1, 0)
 	for level := 2; level <= 60; level++ {
-		cur := MaxHP(level)
+		cur := MaxHP(level, 0)
 		if cur <= prev {
 			t.Fatalf("MaxHP(%d)=%d did not increase over MaxHP(%d)=%d", level, cur, level-1, prev)
 		}
@@ -134,7 +135,7 @@ func TestIsolatedMistakesToKOGetsMoreForgivingWithLevel(t *testing.T) {
 	// levels, per the comments on BaseMistakeDamage and
 	// MistakeDamageMultiplier.
 	mistakesToKO := func(level int) int {
-		hp := MaxHP(level)
+		hp := MaxHP(level, 0)
 		tier := 0
 		switch {
 		case level >= 30:
@@ -279,5 +280,41 @@ func TestIsSuspiciousRunWPMCeiling(t *testing.T) {
 		if got := IsSuspiciousRun(c.r); got != c.want {
 			t.Errorf("%s: IsSuspiciousRun(%+v) = %v, want %v", c.name, c.r, got, c.want)
 		}
+	}
+}
+
+func TestDifficultyLevelRaisesTheTierFloorPerPrestigeRank(t *testing.T) {
+	cases := []struct{ level, prestige, want int }{
+		{1, 0, 1}, {35, 0, 35},
+		{1, 1, 10}, {15, 1, 15},
+		{1, 2, 20},
+		{1, 3, 30}, {1, 9, 30}, {42, 9, 42},
+		{5, -1, 5},
+	}
+	for _, c := range cases {
+		if got := DifficultyLevel(c.level, c.prestige); got != c.want {
+			t.Errorf("DifficultyLevel(%d, %d) = %d, want %d", c.level, c.prestige, got, c.want)
+		}
+	}
+}
+
+// A prestiged level-1 profile is harder than an unprestiged one: fewer
+// isolated mistakes to a knockout, because word damage rises faster than
+// the tier bonus adds HP. And it's harder than the level-30 profile it
+// came from, which is the point of prestiging.
+func TestPrestigeRaisesDifficulty(t *testing.T) {
+	mistakesToKO := func(level, prestige int) int {
+		tier := words.Tier(DifficultyLevel(level, prestige))
+		hit := ComboDamage(1, tier)
+		return (MaxHP(level, prestige) + hit - 1) / hit
+	}
+	if got := mistakesToKO(1, 0); got != 5 {
+		t.Fatalf("expected 5 mistakes to KO at level 1 without prestige, got %d", got)
+	}
+	if a, b := mistakesToKO(1, 1), mistakesToKO(30, 0); a >= b {
+		t.Fatalf("expected prestige 1 at level 1 (%d mistakes) to be harder than level 30 (%d)", a, b)
+	}
+	if MaxHP(1, 1) != BaseMaxHP+TierTransitionHPBonus {
+		t.Fatalf("expected the tier bonus at prestige 1, got %d", MaxHP(1, 1))
 	}
 }

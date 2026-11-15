@@ -70,7 +70,7 @@ On first run you'll be prompted to create a profile. From there:
 - **Typing**: type the words; `backspace` corrects mistakes (even across completed words); `esc` quits
   back to the menu.
 - **Profile**: `a` achievements, `h` test history, `k` weak-key heatmap, `t` cycles an equipped title,
-  `r` reset, `d` delete.
+  `p` prestige (from level 30), `r` reset, `d` delete.
 - **Weak keys**: `l` cycles the keyboard layout the heatmap is drawn in (QWERTY, AZERTY, QWERTZ,
   Dvorak, Colemak). The choice is saved per profile. Mistyped characters the layout has no key for,
   such as accented letters on QWERTY, are listed in an "other" row below the keyboard.
@@ -107,7 +107,7 @@ typecrawl --profile Alice --time 30 --json | jq .wpm
 ```
 
 ```json
-{"profile":"alice","finished_at":"2026-11-15T18:04:05Z","mode":"time","target":30,"source":"random","punctuation":true,"zen":false,"wpm":62.43,"accuracy":97.1,"duration_seconds":30,"words_typed":31,"word_streak":14,"level":7,"xp_gained":58,"new_personal_best":true,"ko":false,"verified":true}
+{"profile":"alice","finished_at":"2026-11-15T18:04:05Z","mode":"time","target":30,"source":"random","punctuation":true,"zen":false,"wpm":62.43,"accuracy":97.1,"duration_seconds":30,"words_typed":31,"word_streak":14,"level":7,"prestige":0,"xp_gained":58,"new_personal_best":true,"ko":false,"verified":true}
 ```
 
 | Field | Meaning |
@@ -122,6 +122,7 @@ typecrawl --profile Alice --time 30 --json | jq .wpm
 | `words_typed` | words completed |
 | `word_streak` | longest run of mistake-free words |
 | `level`, `xp_gained` | the profile's level after the run, and the XP it earned |
+| `prestige` | the profile's prestige rank (0 until it first prestiges) |
 | `new_personal_best` | whether the run set a personal best |
 | `ko` | whether the run ended in a knockout (no XP) |
 | `verified` | `false` for a run that looked scripted; it earned nothing and was not saved |
@@ -159,6 +160,18 @@ apply to.
   from your run history.
 
 A run counts toward neither challenge if it ended in a knockout or was slower than 10 WPM.
+
+### Prestige
+
+Word difficulty rises with your level: Medium words from level 10, Hard from 20, Expert from 30. Once a
+profile reaches level 30, press `p` twice on the profile screen to prestige. The profile goes back to
+level 1 with no XP and gains a prestige rank, which makes every later climb harder: rank 1 starts on
+Medium words, rank 2 on Hard, and rank 3 or higher on Expert, with the mistake damage of that tier and
+only a level-1 profile's HP growth to absorb it.
+
+Prestiging keeps everything else: run history, personal bests, streaks, achievements and your equipped
+title. Prestige ranks 1, 3 and 5 each unlock an achievement you can wear as a title. Resetting a profile
+also clears its prestige.
 
 ### Battle strip
 

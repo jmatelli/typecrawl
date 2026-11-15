@@ -249,7 +249,7 @@ func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 		quotePool = loadQuotePool(m.db)
 	}
 	m.typing = newTypingModel(
-		msg.mode, msg.target, m.width, game.MaxHP(m.profile.Level), m.profile.Level,
+		msg.mode, msg.target, m.width, game.MaxHP(m.profile.Level, m.profile.Prestige), game.DifficultyLevel(m.profile.Level, m.profile.Prestige),
 		msg.punctuation, msg.zenMode, msg.focusWeak, msg.quotes, quotePool, weakChars, ghostPaceMS, ghostWPMSeries,
 	)
 	// The battle strip follows the profile's saved setting, so quick
@@ -359,7 +359,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// achievement progress.
 			m.results = newResultsModel(msg.result, m.width, resultsExtra{unverified: true})
 			m.state = stateResults
-			run := newRunSummary(m.profile.Name, msg, time.Now())
+			run := newRunSummary(m.profile, msg, time.Now())
 			run.Verified = false
 			run.Level = m.profile.Level
 			m.runs = append(m.runs, sessionRun{summary: run})
@@ -491,7 +491,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ghostWPMSeries:        msg.ghostWPMSeries,
 		})
 
-		run := newRunSummary(m.profile.Name, msg, now)
+		run := newRunSummary(m.profile, msg, now)
 		run.Level = newLevel
 		run.XPGained = baseXP + xpBonus + streakBonusXP + challengeBonusXP + weeklyBonusXP
 		run.NewPersonalBest = isNewPB
@@ -504,6 +504,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.state = stateResults
 		}
+		return m, nil
+
+	case prestigedMsg:
+		m.achievementUnlock = newAchievementUnlockModel(msg.unlocked)
+		m.achievementUnlock.then = viewProfileMsg{}
+		m.state = stateAchievementUnlock
 		return m, nil
 
 	case shareRunMsg:

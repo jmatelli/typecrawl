@@ -223,13 +223,13 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m menuModel) View() string {
 	title := titleStyle.Render("Typecrawl")
 	profileLine := fmt.Sprintf(
-		"%s%s   Level %d   XP %d/%d   HP %s   Difficulty: %s",
+		"%s%s   Level %d%s   XP %d/%d   HP %s   Difficulty: %s",
 		boldStyle.Render(m.profile.Name), titleSuffix(m.profile.EquippedTitle),
-		m.profile.Level,
+		m.profile.Level, prestigeSuffix(m.profile.Prestige),
 		m.profile.XP,
 		game.XPToNextLevel(m.profile.Level),
-		renderHPBar(game.MaxHP(m.profile.Level), game.MaxHP(m.profile.Level)),
-		boldStyle.Render(words.TierName(words.Tier(m.profile.Level))),
+		renderHPBar(game.MaxHP(m.profile.Level, m.profile.Prestige), game.MaxHP(m.profile.Level, m.profile.Prestige)),
+		boldStyle.Render(words.TierName(words.Tier(game.DifficultyLevel(m.profile.Level, m.profile.Prestige)))),
 	)
 	streakLine := fmt.Sprintf(
 		"Daily streak: %s   (current XP multiplier: %s)",

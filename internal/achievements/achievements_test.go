@@ -104,7 +104,7 @@ func TestCheckAndProgressAgreeForEveryThresholdAchievement(t *testing.T) {
 	probes := []Progress{
 		{},
 		{
-			Level: 1000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
+			Level: 1000, Prestige: 1_000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
 			DailyStreak: 1_000_000, BestWPM: 100_000, PerfectRunCount: 1_000_000, MaxPerfectStreak: 1_000_000,
 			ComebackCount: 1_000_000, PunctuationRunCount: 1_000_000, ZenRunCount: 1_000_000,
 			TotalWordsTyped: 1_000_000_000, TotalPlaySeconds: 1_000_000_000,
@@ -150,7 +150,7 @@ func TestUnlockedCountZeroForZeroProgress(t *testing.T) {
 
 func TestUnlockedCountAllForMaxedProgress(t *testing.T) {
 	maxed := Progress{
-		Level: 1000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
+		Level: 1000, Prestige: 1_000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
 		DailyStreak: 1_000_000, BestWPM: 100_000, PerfectRunCount: 1_000_000, MaxPerfectStreak: 1_000_000,
 		CompletedLongHaul: true, CompletedSprint: true, PracticedLateNight: true, PracticedEarlyMorning: true,
 		HasBestInBothModes: true, PracticedAllWeekdays: true, HadBigDay: true, CompletedUltraLongHaul: true,
@@ -273,5 +273,28 @@ func TestBooleanAchievementsUnlockOnlyOnTheirExactFlag(t *testing.T) {
 		if !a.Unlocked(c.set(true)) {
 			t.Errorf("%s: expected unlocked when its flag is true", c.id)
 		}
+	}
+}
+
+// Prestiging sends the level back to 1, but the level achievements were
+// earned on the way to level 30 and must stay unlocked, at full progress.
+func TestLevelAchievementsSurvivePrestige(t *testing.T) {
+	p := Progress{Level: 1, Prestige: 1}
+	byID := map[string]Achievement{}
+	for _, a := range All {
+		byID[a.ID] = a
+	}
+	for _, id := range []string{"level_5", "level_10", "level_20", "level_30", "prestige_1"} {
+		if !byID[id].Unlocked(p) {
+			t.Errorf("%s: expected unlocked after prestiging", id)
+		}
+	}
+	for _, id := range []string{"prestige_3", "prestige_5"} {
+		if byID[id].Unlocked(p) {
+			t.Errorf("%s: expected locked at prestige 1", id)
+		}
+	}
+	if levelReached(Progress{Level: 3}) != 3 || levelReached(Progress{Level: 3, Prestige: 2}) != 30 || levelReached(Progress{Level: 34, Prestige: 1}) != 34 {
+		t.Error("levelReached: wrong level")
 	}
 }

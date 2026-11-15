@@ -162,12 +162,21 @@ func IsSuspiciousRun(result stats.Result) bool {
 	return result.KeystrokeSamples >= MinKeystrokeSamplesForCVCheck && result.KeystrokeCV < MinPlausibleKeystrokeCV
 }
 
-// MaxHP returns the max HP for a given level: smooth per-level growth plus
-// a one-time bonus for each difficulty tier that level has unlocked, to
-// cushion the sharp jump in word length (and so mistake exposure) at each
-// tier transition -- see TierTransitionHPBonus.
-func MaxHP(level int) int {
-	return BaseMaxHP + (level-1)*HPPerLevel + words.Tier(level)*TierTransitionHPBonus
+// DifficultyLevel is the level whose word tier a profile plays at: its
+// own level, raised by its prestige rank so that each rank starts one
+// tier further up (Medium words from level 1 at rank 1, Hard at rank 2,
+// Expert from rank 3 on). Everything that depends on word difficulty --
+// the word list, mistake damage and MaxHP's tier bonus -- goes through it.
+func DifficultyLevel(level, prestige int) int {
+	return max(level, 10*min(max(prestige, 0), 3))
+}
+
+// MaxHP returns the max HP for a given level and prestige rank: smooth
+// per-level growth plus a one-time bonus for each difficulty tier unlocked
+// (see DifficultyLevel), to cushion the sharp jump in word length (and so
+// mistake exposure) at each tier transition -- see TierTransitionHPBonus.
+func MaxHP(level, prestige int) int {
+	return BaseMaxHP + (level-1)*HPPerLevel + words.Tier(DifficultyLevel(level, prestige))*TierTransitionHPBonus
 }
 
 // xpCumulativeTotal returns the total XP needed to have reached level

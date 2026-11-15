@@ -90,7 +90,7 @@ type typingModel struct {
 	width      int
 	commits    []wordCommit // undo stack for backspacing across word boundaries
 
-	level       int          // player level at test start; sets the word difficulty tier
+	level       int          // game.DifficultyLevel at test start; sets the word difficulty tier
 	punctuation bool         // whether words get sentence-style capitals/punctuation
 	zenMode     bool         // disables HP loss/KO for pure practice
 	focusWeak   bool         // whether word choice is biased toward weak characters

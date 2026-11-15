@@ -10,6 +10,8 @@ import (
 
 	"github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jmatelli/typecrawl/internal/storage"
 )
 
 // RunSummary is one finished run, in the form it leaves the program: as
@@ -30,6 +32,7 @@ type RunSummary struct {
 	WordsTyped      int       `json:"words_typed"`
 	WordStreak      int       `json:"word_streak"` // longest mistake-free word streak in the run
 	Level           int       `json:"level"`       // the profile's level after the run
+	Prestige        int       `json:"prestige"`    // the profile's prestige rank
 	XPGained        int       `json:"xp_gained"`
 	NewPersonalBest bool      `json:"new_personal_best"`
 	KO              bool      `json:"ko"`
@@ -42,9 +45,10 @@ type RunSummary struct {
 // 62.43333333333333.
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
 
-func newRunSummary(profile string, msg finishTypingMsg, when time.Time) RunSummary {
+func newRunSummary(profile *storage.Profile, msg finishTypingMsg, when time.Time) RunSummary {
 	return RunSummary{
-		Profile:         profile,
+		Profile:         profile.Name,
+		Prestige:        profile.Prestige,
 		FinishedAt:      when.Truncate(time.Second),
 		Mode:            modeString(msg.mode),
 		Target:          msg.target,
@@ -81,6 +85,9 @@ func (s RunSummary) Text() string {
 	}
 
 	outcome := []string{fmt.Sprintf("word streak %d", s.WordStreak), fmt.Sprintf("level %d", s.Level)}
+	if s.Prestige > 0 {
+		outcome = append(outcome, fmt.Sprintf("prestige %d", s.Prestige))
+	}
 	switch {
 	case !s.Verified:
 		outcome = []string{"unverified run"}

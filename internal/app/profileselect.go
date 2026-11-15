@@ -113,6 +113,9 @@ func (m profileSelectModel) View() string {
 	}
 	for i, p := range m.profiles {
 		line := fmt.Sprintf("%-16s Lv.%-3d %d/%d xp", p.Name, p.Level, p.XP, game.XPToNextLevel(p.Level))
+		if p.Prestige > 0 {
+			line += fmt.Sprintf("   prestige %d", p.Prestige)
+		}
 		if i == m.cursor {
 			line = boldStyle.Render("> " + line)
 		} else {
