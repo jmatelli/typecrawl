@@ -100,8 +100,9 @@ NO_COLOR=1 typecrawl
 ```
 
 The typing view then uses bold for what you've typed, reverse video for mistakes, and faint text for
-the words still to come. Views that use colour as a scale, such as the weak-key and activity heatmaps,
-lose that scale.
+the words still to come. Views that use colour as a scale keep the scale another way: the activity
+heatmap uses denser glyphs for busier days (`· ░ ▒ ▓ █`), the weak-key keyboard ranks keys from faint (never missed) through plain, bold, and bold underlined to
+reverse video for the most-missed keys, and the ghost curve on the results graph is faint.
 
 ## License
 

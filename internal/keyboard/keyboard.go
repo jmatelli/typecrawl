@@ -23,18 +23,24 @@ var rowIndents = []string{"", " ", "  ", "   "}
 
 // keyStyle colors a key by its mistake count relative to the keyboard's
 // hottest key (ratio 0 = never missed, ratio 1 = the most missed key).
+//
+// Each bucket also differs from its neighbours by a text attribute, so
+// the scale survives for players who can't tell the colours apart and
+// with colour turned off (see package theme): faint, plain, bold, bold
+// and underlined, then reverse video for the worst keys.
 func keyStyle(ratio float64) lipgloss.Style {
 	switch {
 	case ratio <= 0:
-		return lipgloss.NewStyle().Foreground(theme.Color("240")) // no data: dim gray
+		// no data: dim gray, which already reads as faint
+		return theme.Pick(lipgloss.NewStyle().Foreground(theme.Color("240")), lipgloss.NewStyle().Faint(true))
 	case ratio < 0.25:
 		return lipgloss.NewStyle().Foreground(theme.Color("2")) // green
 	case ratio < 0.5:
-		return lipgloss.NewStyle().Foreground(theme.Color("3")) // yellow
+		return lipgloss.NewStyle().Foreground(theme.Color("3")).Bold(true) // yellow
 	case ratio < 0.75:
-		return lipgloss.NewStyle().Foreground(theme.Color("208")) // orange
+		return lipgloss.NewStyle().Foreground(theme.Color("208")).Bold(true).Underline(true) // orange
 	default:
-		return lipgloss.NewStyle().Foreground(theme.Color("1")) // red
+		return lipgloss.NewStyle().Foreground(theme.Color("1")).Bold(true).Reverse(true) // red
 	}
 }
 

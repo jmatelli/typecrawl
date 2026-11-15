@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   apart without relying on colour: `*` golden, `+` green, `~` blue. The
   marker stays on the word while it is being typed, and the shield
   indicators carry the marker of the word that grants them.
+- Views that used colour as a scale keep the scale without it. With
+  colour off, the activity heatmap uses denser glyphs for busier days and
+  the ghost curve on the results graph is faint.
+
+### Changed
+
+- The weak-key keyboard ranks keys by text attribute as well as colour,
+  whether colour is on or off: plain, bold, bold and underlined, then
+  reverse video for the most-missed keys. Keys never missed are gray, or
+  faint with colour off.
+- The ghost's entry in the results graph legend uses a dashed line.
 
 ### Fixed
 
