@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/textsource"
 )
 
 // RunSummary is one finished run, in the form it leaves the program: as
@@ -19,23 +20,27 @@ import (
 // JSON line --json prints on exit. The JSON field names are documented in
 // the README; changing one breaks scripts that read them.
 type RunSummary struct {
-	Profile         string    `json:"profile"`
-	FinishedAt      time.Time `json:"finished_at"`
-	Mode            string    `json:"mode"`   // "time" or "words"
-	Target          int       `json:"target"` // seconds for "time", words for "words"
-	Source          string    `json:"source"` // "random" or "quotes"
-	Punctuation     bool      `json:"punctuation"`
-	Zen             bool      `json:"zen"`
-	WPM             float64   `json:"wpm"`
-	Accuracy        float64   `json:"accuracy"` // percent, 0-100
-	DurationSeconds float64   `json:"duration_seconds"`
-	WordsTyped      int       `json:"words_typed"`
-	WordStreak      int       `json:"word_streak"` // longest mistake-free word streak in the run
-	Level           int       `json:"level"`       // the profile's level after the run
-	Prestige        int       `json:"prestige"`    // the profile's prestige rank
-	XPGained        int       `json:"xp_gained"`
-	NewPersonalBest bool      `json:"new_personal_best"`
-	KO              bool      `json:"ko"`
+	Profile    string    `json:"profile"`
+	FinishedAt time.Time `json:"finished_at"`
+	Mode       string    `json:"mode"`   // "time" or "words"
+	Target     int       `json:"target"` // seconds for "time", words for "words"
+	Source     string    `json:"source"` // "random", "quotes", "wordlist" or "text"
+	// SourceName is a word list's or text's file name, without the
+	// directories leading to it, which can say more than a player means
+	// to share. Empty for the built-in sources.
+	SourceName      string  `json:"source_name,omitempty"`
+	Punctuation     bool    `json:"punctuation"`
+	Zen             bool    `json:"zen"`
+	WPM             float64 `json:"wpm"`
+	Accuracy        float64 `json:"accuracy"` // percent, 0-100
+	DurationSeconds float64 `json:"duration_seconds"`
+	WordsTyped      int     `json:"words_typed"`
+	WordStreak      int     `json:"word_streak"` // longest mistake-free word streak in the run
+	Level           int     `json:"level"`       // the profile's level after the run
+	Prestige        int     `json:"prestige"`    // the profile's prestige rank
+	XPGained        int     `json:"xp_gained"`
+	NewPersonalBest bool    `json:"new_personal_best"`
+	KO              bool    `json:"ko"`
 	// Verified is false for a run that looked scripted (see
 	// game.IsSuspiciousRun); it earned nothing and wasn't saved.
 	Verified bool `json:"verified"`
@@ -46,13 +51,15 @@ type RunSummary struct {
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
 
 func newRunSummary(profile *storage.Profile, msg finishTypingMsg, when time.Time) RunSummary {
+	source := runSource(msg.quotes, msg.custom)
 	return RunSummary{
 		Profile:         profile.Name,
 		Prestige:        profile.Prestige,
 		FinishedAt:      when.Truncate(time.Second),
 		Mode:            modeString(msg.mode),
 		Target:          msg.target,
-		Source:          sourceString(msg.quotes),
+		Source:          string(source.Kind),
+		SourceName:      source.FileName(),
 		Punctuation:     msg.punctuation,
 		Zen:             msg.zenMode,
 		WPM:             round2(msg.result.WPM),
@@ -72,9 +79,17 @@ func (s RunSummary) Text() string {
 	if s.Mode == "time" {
 		setup[0] += "s"
 	}
-	if s.Source == "quotes" {
+	switch textsource.Kind(s.Source) {
+	case textsource.Quotes:
 		setup = append(setup, "quotes")
-	} else {
+	case textsource.Text:
+		setup = append(setup, "text "+s.SourceName)
+	case textsource.WordList:
+		setup = append(setup, "word list "+s.SourceName)
+		if s.Punctuation {
+			setup = append(setup, "punctuation")
+		}
+	default:
 		setup = append(setup, "random words")
 		if s.Punctuation {
 			setup = append(setup, "punctuation")

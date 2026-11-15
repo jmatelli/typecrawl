@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/textsource"
 )
 
 const historyLimit = 100
@@ -62,6 +63,13 @@ func (m historyViewModel) View() string {
 		}
 		if e.ZenMode {
 			flags = append(flags, "zen")
+		}
+		if src, ok := textsource.Parse(e.Source); ok && src.Kind != textsource.Random {
+			if src.Custom() {
+				flags = append(flags, src.FileName())
+			} else {
+				flags = append(flags, "quotes")
+			}
 		}
 		flagStr := strings.Join(flags, ",")
 

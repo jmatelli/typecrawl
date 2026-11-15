@@ -170,6 +170,12 @@ func migrate(db *sql.DB) error {
 			claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (profile_id, week)
 		);
+		CREATE TABLE IF NOT EXISTS custom_sources (
+			profile_id INTEGER NOT NULL REFERENCES profiles(id),
+			source     TEXT NOT NULL,
+			added_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (profile_id, source)
+		);
 		CREATE TABLE IF NOT EXISTS quotes_cache (
 			id     INTEGER PRIMARY KEY,
 			quote  TEXT NOT NULL,
@@ -201,6 +207,9 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := addColumnIfMissing(db, "settings", "keyboard_layout", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "settings", "custom_source", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := addColumnIfMissing(db, "test_history", "punctuation", "INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -457,7 +466,7 @@ func ListProfiles(db *sql.DB) ([]*Profile, error) {
 
 // DeleteProfile permanently removes a profile and everything tied to it.
 func DeleteProfile(db *sql.DB, id int64) error {
-	for _, table := range []string{"daily_activity", "settings", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims"} {
+	for _, table := range []string{"daily_activity", "settings", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims", "custom_sources"} {
 		if _, err := db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE profile_id = ?`, table), id); err != nil {
 			return err
 		}
@@ -469,7 +478,8 @@ func DeleteProfile(db *sql.DB, id int64) error {
 // ResetProfile resets a profile's level, XP, prestige, activity history,
 // personal bests, weak-key stats, and test history back to the starting
 // values, keeping its name and its all-time records (best word streak, KO
-// count). Prestige is progress, like the level, so it goes too.
+// count). Prestige is progress, like the level, so it goes too. Settings
+// and saved custom sources are preferences, not progress, and stay.
 func ResetProfile(db *sql.DB, id int64) (*Profile, error) {
 	if _, err := db.Exec(`UPDATE profiles SET level = 1, xp = 0, equipped_title = '', prestige = 0 WHERE id = ?`, id); err != nil {
 		return nil, err
@@ -564,6 +574,10 @@ type Settings struct {
 	// in (see package keyboard). "" -- what profiles and backups from
 	// before layouts existed read as -- means QWERTY.
 	KeyboardLayout string
+	// CustomSource is the key (see textsource.Source.Key) of the saved
+	// custom source the menu has selected, or "" for the built-in source
+	// Quotes picks. Older backups don't carry it.
+	CustomSource string `json:",omitempty"`
 }
 
 func defaultSettings() Settings {
@@ -573,11 +587,11 @@ func defaultSettings() Settings {
 // LoadSettings returns profileID's saved settings, or sensible defaults if
 // none have been saved yet.
 func LoadSettings(db *sql.DB, profileID int64) (Settings, error) {
-	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout FROM settings WHERE profile_id = ?`, profileID)
+	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout, custom_source FROM settings WHERE profile_id = ?`, profileID)
 
 	var s Settings
 	var punctuation, zenMode, focusWeak, quotes, hideBattleStrip int
-	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip, &s.KeyboardLayout)
+	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip, &s.KeyboardLayout, &s.CustomSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultSettings(), nil
 	}
@@ -602,8 +616,8 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 		return 0
 	}
 	_, err := db.Exec(`
-		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout, custom_source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
 			mode        = excluded.mode,
 			duration    = excluded.duration,
@@ -613,8 +627,9 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 			focus_weak  = excluded.focus_weak,
 			quotes      = excluded.quotes,
 			hide_battle_strip = excluded.hide_battle_strip,
-			keyboard_layout = excluded.keyboard_layout
-	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak), toInt(s.Quotes), toInt(s.HideBattleStrip), s.KeyboardLayout)
+			keyboard_layout = excluded.keyboard_layout,
+			custom_source = excluded.custom_source
+	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak), toInt(s.Quotes), toInt(s.HideBattleStrip), s.KeyboardLayout, s.CustomSource)
 	return err
 }
 
@@ -636,10 +651,10 @@ func SaveKeyboardLayout(db *sql.DB, profileID int64, layout string) error {
 type PersonalBest struct {
 	Mode   string
 	Target int
-	// Source is "random" or "quotes" -- a quotes run and a random-words run
-	// at the same mode/target are tracked as separate personal bests, since
-	// typing fixed quote text is a meaningfully different challenge from
-	// random words.
+	// Source is "random", "quotes", or a custom file's key such as
+	// "wordlist:/home/me/french.txt" (see textsource.Source.Key). Each is
+	// tracked as a separate personal best at the same mode/target, since
+	// typing different text is a different challenge.
 	Source     string
 	WPM        float64
 	Accuracy   float64
@@ -796,7 +811,7 @@ func ListPersonalBests(db *sql.DB, profileID int64) ([]PersonalBest, error) {
 func BestOverallWPM(db *sql.DB, profileID int64) (*PersonalBest, error) {
 	row := db.QueryRow(`
 		SELECT mode, target, source, best_wpm, accuracy, achieved_at, ghost_pace, ghost_wpm_series
-		FROM personal_bests WHERE profile_id = ? ORDER BY best_wpm DESC LIMIT 1
+		FROM personal_bests WHERE profile_id = ? AND `+builtinSource+` ORDER BY best_wpm DESC LIMIT 1
 	`, profileID)
 
 	var pb PersonalBest
@@ -981,9 +996,59 @@ func WeekTotalsBetween(db *sql.DB, profileID int64, from, to time.Time, minWPM f
 		       COALESCE(SUM(duration_seconds), 0),
 		       COUNT(DISTINCT substr(CAST(created_at AS TEXT), 1, 10))
 		FROM test_history
-		WHERE profile_id = ? AND ko = 0 AND wpm >= ? AND created_at >= ? AND created_at < ?
+		WHERE profile_id = ? AND ko = 0 AND wpm >= ? AND created_at >= ? AND created_at < ? AND `+builtinSource+`
 	`, profileID, minWPM, from, to).Scan(&t.Runs, &t.Words, &t.AccurateRuns, &t.QuotesRuns, &t.Seconds, &t.Days)
 	return t, err
+}
+
+// builtinSource limits a query over test_history or personal_bests to
+// runs on the game's own text: random words and quotes. Achievements and
+// challenges are judged on these alone, because a player's own word list
+// can make them trivial (a list of nothing but "a").
+const builtinSource = "source IN ('random', 'quotes')"
+
+// SaveCustomSource adds source (a textsource.Source key) to profileID's
+// saved custom sources, which the menu lets the player pick from. Saving
+// one already there changes nothing.
+func SaveCustomSource(db *sql.DB, profileID int64, source string, when time.Time) error {
+	return saveCustomSource(db, profileID, source, when)
+}
+
+func saveCustomSource(db execer, profileID int64, source string, when time.Time) error {
+	_, err := db.Exec(`INSERT OR IGNORE INTO custom_sources (profile_id, source, added_at) VALUES (?, ?, ?)`,
+		profileID, source, dbTime(when))
+	return err
+}
+
+// execer is what *sql.DB and *sql.Tx have in common for writes.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// ListCustomSources returns profileID's saved custom sources, oldest
+// first.
+func ListCustomSources(db *sql.DB, profileID int64) ([]string, error) {
+	rows, err := db.Query(`SELECT source FROM custom_sources WHERE profile_id = ? ORDER BY added_at, source`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var source string
+		if err := rows.Scan(&source); err != nil {
+			return nil, err
+		}
+		out = append(out, source)
+	}
+	return out, rows.Err()
+}
+
+// ForgetCustomSource removes source from profileID's saved custom sources.
+// Its history and personal bests stay.
+func ForgetCustomSource(db *sql.DB, profileID int64, source string) error {
+	_, err := db.Exec(`DELETE FROM custom_sources WHERE profile_id = ? AND source = ?`, profileID, source)
+	return err
 }
 
 // CachedQuote is one quote cached locally from the quotes API -- shared
@@ -1093,7 +1158,7 @@ type TestHistoryEntry struct {
 	KO          bool
 	Punctuation bool
 	ZenMode     bool
-	// Source is "random" or "quotes" (see PersonalBest.Source).
+	// Source is the run's source key (see PersonalBest.Source).
 	Source     string
 	WordsTyped int
 	Duration   time.Duration
@@ -1156,13 +1221,13 @@ func RecentAccuracyHistory(db *sql.DB, profileID int64, limit int) ([]float64, e
 // HasPerfectAccuracyRun reports whether profileID has ever completed
 // (non-KO) an exercise with 100% accuracy.
 func HasPerfectAccuracyRun(db *sql.DB, profileID int64) (bool, error) {
-	return exists(db, `SELECT 1 FROM test_history WHERE profile_id = ? AND ko = 0 AND accuracy >= 100 LIMIT 1`, profileID)
+	return exists(db, `SELECT 1 FROM test_history WHERE profile_id = ? AND ko = 0 AND accuracy >= 100 AND `+builtinSource+` LIMIT 1`, profileID)
 }
 
 // HasCompletedTestConfig reports whether profileID has ever completed
 // (non-KO) an exercise with exactly this mode and target.
 func HasCompletedTestConfig(db *sql.DB, profileID int64, mode string, target int) (bool, error) {
-	return exists(db, `SELECT 1 FROM test_history WHERE profile_id = ? AND ko = 0 AND mode = ? AND target = ? LIMIT 1`,
+	return exists(db, `SELECT 1 FROM test_history WHERE profile_id = ? AND ko = 0 AND mode = ? AND target = ? AND `+builtinSource+` LIMIT 1`,
 		profileID, mode, target)
 }
 
@@ -1170,7 +1235,7 @@ func HasCompletedTestConfig(db *sql.DB, profileID int64, mode string, target int
 // (KO or not -- this is about when you practice, not how well it went)
 // whose local start hour falls in [startHour, endHour).
 func HasTestInHourRange(db *sql.DB, profileID int64, startHour, endHour int) (bool, error) {
-	rows, err := db.Query(`SELECT created_at FROM test_history WHERE profile_id = ?`, profileID)
+	rows, err := db.Query(`SELECT created_at FROM test_history WHERE profile_id = ? AND `+builtinSource, profileID)
 	if err != nil {
 		return false, err
 	}
@@ -1194,7 +1259,7 @@ func HasTestInHourRange(db *sql.DB, profileID int64, startHour, endHour int) (bo
 // (e.g. "500 or more"), which the CLI's arbitrary --words target can satisfy
 // with any value at or above the threshold.
 func HasCompletedWordsAtLeast(db *sql.DB, profileID int64, minWords int) (bool, error) {
-	return exists(db, `SELECT 1 FROM test_history WHERE profile_id = ? AND ko = 0 AND mode = 'words' AND target >= ? LIMIT 1`,
+	return exists(db, `SELECT 1 FROM test_history WHERE profile_id = ? AND ko = 0 AND mode = 'words' AND target >= ? AND `+builtinSource+` LIMIT 1`,
 		profileID, minWords)
 }
 
@@ -1202,7 +1267,7 @@ func HasCompletedWordsAtLeast(db *sql.DB, profileID int64, minWords int) (bool, 
 // personal best in both time mode and words mode.
 func HasPersonalBestInBothModes(db *sql.DB, profileID int64) (bool, error) {
 	var count int
-	err := db.QueryRow(`SELECT COUNT(DISTINCT mode) FROM personal_bests WHERE profile_id = ?`, profileID).Scan(&count)
+	err := db.QueryRow(`SELECT COUNT(DISTINCT mode) FROM personal_bests WHERE profile_id = ? AND `+builtinSource, profileID).Scan(&count)
 	if err != nil {
 		return false, err
 	}
@@ -1213,7 +1278,7 @@ func HasPersonalBestInBothModes(db *sql.DB, profileID int64) (bool, error) {
 // exercise on all 7 days of the week (Sunday through Saturday), not
 // necessarily in the same week or consecutively.
 func HasPracticedAllWeekdays(db *sql.DB, profileID int64) (bool, error) {
-	rows, err := db.Query(`SELECT created_at FROM test_history WHERE profile_id = ?`, profileID)
+	rows, err := db.Query(`SELECT created_at FROM test_history WHERE profile_id = ? AND `+builtinSource, profileID)
 	if err != nil {
 		return false, err
 	}
@@ -1240,7 +1305,7 @@ func HasDayWithAtLeast(db *sql.DB, profileID int64, n int) (bool, error) {
 // with 100% accuracy.
 func PerfectRunCount(db *sql.DB, profileID int64) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND ko = 0 AND accuracy >= 100`, profileID).Scan(&n)
+	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND ko = 0 AND accuracy >= 100 AND `+builtinSource, profileID).Scan(&n)
 	return n, err
 }
 
@@ -1248,7 +1313,7 @@ func PerfectRunCount(db *sql.DB, profileID int64) (int, error) {
 // back-to-back exercises profileID has completed with 100% accuracy and no
 // knockout -- any other result (a mistake, or a KO) resets the streak.
 func MaxPerfectAccuracyStreak(db *sql.DB, profileID int64) (int, error) {
-	rows, err := db.Query(`SELECT ko, accuracy FROM test_history WHERE profile_id = ? ORDER BY id ASC`, profileID)
+	rows, err := db.Query(`SELECT ko, accuracy FROM test_history WHERE profile_id = ? AND `+builtinSource+` ORDER BY id ASC`, profileID)
 	if err != nil {
 		return 0, err
 	}
@@ -1278,7 +1343,7 @@ func MaxPerfectAccuracyStreak(db *sql.DB, profileID int64) (int, error) {
 // exercise that finished without a knockout, plus whether any of those
 // follow-up exercises scored 100% accuracy.
 func comebackStats(db *sql.DB, profileID int64) (count int, anyPerfect bool, err error) {
-	rows, err := db.Query(`SELECT ko, accuracy FROM test_history WHERE profile_id = ? ORDER BY id ASC`, profileID)
+	rows, err := db.Query(`SELECT ko, accuracy FROM test_history WHERE profile_id = ? AND `+builtinSource+` ORDER BY id ASC`, profileID)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1333,7 +1398,7 @@ func PunctuationRunCount(db *sql.DB, profileID int64) (int, error) {
 // mode.
 func ZenRunCount(db *sql.DB, profileID int64) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND zen_mode = 1`, profileID).Scan(&n)
+	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND zen_mode = 1 AND `+builtinSource, profileID).Scan(&n)
 	return n, err
 }
 
@@ -1349,7 +1414,7 @@ func QuoteRunCount(db *sql.DB, profileID int64) (int, error) {
 // profileID, across every exercise including knockouts.
 func TotalPlayTime(db *sql.DB, profileID int64) (time.Duration, error) {
 	var totalSeconds int64
-	err := db.QueryRow(`SELECT COALESCE(SUM(duration_seconds), 0) FROM test_history WHERE profile_id = ?`, profileID).Scan(&totalSeconds)
+	err := db.QueryRow(`SELECT COALESCE(SUM(duration_seconds), 0) FROM test_history WHERE profile_id = ? AND `+builtinSource, profileID).Scan(&totalSeconds)
 	if err != nil {
 		return 0, err
 	}
@@ -1361,7 +1426,7 @@ func TotalPlayTime(db *sql.DB, profileID int64) (time.Duration, error) {
 // counts as words typed).
 func TotalWordsTyped(db *sql.DB, profileID int64) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COALESCE(SUM(words_typed), 0) FROM test_history WHERE profile_id = ?`, profileID).Scan(&n)
+	err := db.QueryRow(`SELECT COALESCE(SUM(words_typed), 0) FROM test_history WHERE profile_id = ? AND `+builtinSource, profileID).Scan(&n)
 	return n, err
 }
 

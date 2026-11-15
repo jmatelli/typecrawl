@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 func TestTierBoundaries(t *testing.T) {
@@ -214,5 +216,83 @@ func TestForLevelWithPunctuatedTailStillAvoidsImmediateRepeat(t *testing.T) {
 		if list[0] == word {
 			t.Fatalf("trial %d: expected punctuated tail to still exclude %q via baseForm", trial, word)
 		}
+	}
+}
+
+func TestFromListDrawsOnlyFromTheGivenList(t *testing.T) {
+	list := []string{"café", "école", "привет", "日本語"}
+	for _, weak := range []map[rune]int{nil, {'é': 5}} {
+		got := FromList(list, 200, weak)
+		if len(got) != 200 {
+			t.Fatalf("expected 200 words, got %d", len(got))
+		}
+		for i, w := range got {
+			if !slices.Contains(list, w) {
+				t.Fatalf("got %q, which isn't in the list", w)
+			}
+			if i > 0 && got[i-1] == w {
+				t.Fatalf("expected no immediate repeat, got %q twice at %d", w, i)
+			}
+		}
+	}
+}
+
+func TestFromListBiasesTowardWeakCharacters(t *testing.T) {
+	list := []string{"gz"}
+	for i := range 29 {
+		list = append(list, "w"+strings.Repeat("a", i+1))
+	}
+	got := FromList(list, 2000, map[rune]int{'z': weakCharCap})
+	n := 0
+	for _, w := range got {
+		if w == "gz" {
+			n++
+		}
+	}
+	// Uniform would give about 2000/30 = 67. The no-repeat window caps
+	// any one word at once every 6 picks, about 333.
+	if n < 200 {
+		t.Fatalf("expected the word with the weak key to come up far more often, got %d of 2000", n)
+	}
+}
+
+// A word that holds nearly all the weight still never repeats inside the
+// window: the draw falls back to another word.
+func TestFromListAvoidsRepeatsEvenWhenOneWordDominates(t *testing.T) {
+	list := []string{"zzzzzzzzzz", "a", "b"}
+	got := FromList(list, 300, map[rune]int{'z': weakCharCap})
+	for i := 1; i < len(got); i++ {
+		if got[i] == got[i-1] {
+			t.Fatalf("expected no immediate repeat, got %q twice at %d", got[i], i)
+		}
+	}
+}
+
+func TestFromListIsQuickOnAHugeList(t *testing.T) {
+	list := make([]string, 300_000)
+	for i := range list {
+		list[i] = "word" + strings.Repeat("x", i%12)
+	}
+	start := time.Now()
+	FromList(list, 60, map[rune]int{'x': 3, 'w': 1})
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("expected a 60-word top-up to be quick, took %v", d)
+	}
+}
+
+func TestPunctuateCapitalizesNonASCIIWholeLetters(t *testing.T) {
+	for range 20 {
+		out := Punctuate([]string{"école", "été", "жук", "über", "ok", "ça", "ñu"})
+		if out[0] != "École" {
+			t.Fatalf("expected the first word capitalized as a whole letter, got %q", out[0])
+		}
+		for _, w := range out {
+			if !utf8.ValidString(w) {
+				t.Fatalf("expected valid UTF-8, got %q", w)
+			}
+		}
+	}
+	if got := baseForm("École."); got != "école" {
+		t.Fatalf("baseForm(École.) = %q", got)
 	}
 }

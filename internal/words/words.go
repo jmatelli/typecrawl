@@ -7,6 +7,8 @@ import (
 	"math/rand"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // tiers holds the word lists in increasing order of difficulty. Every 10
@@ -138,10 +140,36 @@ func ForLevelWeak(n, level int, weakChars map[rune]int, tail ...string) []string
 	if len(weakChars) == 0 {
 		return ForLevel(n, level, tail...)
 	}
+	return FromList(tiers[Tier(level)], n, weakChars, tail...)
+}
 
-	list := tiers[Tier(level)]
+// FromList is ForLevelWeak over a list of the caller's own, such as a
+// player's word list file: n words drawn from list, weighted toward
+// weakChars when it isn't empty, with the same no-repeat window. list
+// must not be empty.
+func FromList(list []string, n int, weakChars map[rune]int, tail ...string) []string {
+	// The weights are worked out once per call rather than once per word:
+	// a player's list can hold hundreds of thousands of words.
+	var cumulative []int
+	if len(weakChars) > 0 {
+		cumulative = make([]int, len(list))
+		total := 0
+		for i, w := range list {
+			total += 1 + wordWeakScore(w, weakChars)
+			cumulative[i] = total
+		}
+	}
+	draw := func() string {
+		if cumulative == nil {
+			return list[rand.Intn(len(list))]
+		}
+		// The first word whose running total passes r: each word's chance
+		// is its weight, 1 plus its weak-character score, over the total.
+		i, _ := slices.BinarySearch(cumulative, rand.Intn(cumulative[len(cumulative)-1])+1)
+		return list[i]
+	}
+
 	out := make([]string, 0, n)
-
 	start := max(0, len(tail)-noRepeatWindow)
 	recent := make([]string, len(tail)-start, noRepeatWindow)
 	for i, w := range tail[start:] {
@@ -149,7 +177,7 @@ func ForLevelWeak(n, level int, weakChars map[rune]int, tail ...string) []string
 	}
 
 	for range n {
-		w := pickWordWeighted(list, recent, weakChars)
+		w := pickNotRecent(list, recent, draw)
 		out = append(out, w)
 		recent = append(recent, w)
 		if len(recent) > noRepeatWindow {
@@ -157,6 +185,27 @@ func ForLevelWeak(n, level int, weakChars map[rune]int, tail ...string) []string
 		}
 	}
 	return out
+}
+
+// pickNotRecent draws from list until it gets a word outside recent's
+// tail. If a heavily weighted word keeps coming up, it falls back to the
+// first such word after a random point, so it always terminates and never
+// repeats a word inside the window.
+func pickNotRecent(list, recent []string, draw func() string) string {
+	window := min(len(recent), len(list)-1)
+	excluded := recent[len(recent)-window:]
+	for range 30 {
+		if w := draw(); !slices.Contains(excluded, w) {
+			return w
+		}
+	}
+	offset := rand.Intn(len(list))
+	for i := range list {
+		if w := list[(offset+i)%len(list)]; !slices.Contains(excluded, w) {
+			return w
+		}
+	}
+	return list[offset] // every word is in the window: only when list repeats words
 }
 
 // weakCharCap bounds how much a single character's mistake count can
@@ -172,42 +221,6 @@ func wordWeakScore(w string, weakChars map[rune]int) int {
 		score += min(weakChars[r], weakCharCap)
 	}
 	return score
-}
-
-// pickWordWeighted is pickWord's weighted counterpart: candidates are drawn
-// from list excluding recent's tail, with each word's chance proportional
-// to 1 + its weak-character score (so every word stays reachable, just
-// less likely).
-func pickWordWeighted(list, recent []string, weakChars map[rune]int) string {
-	window := min(len(recent), len(list)-1)
-	excluded := recent[len(recent)-window:]
-
-	type candidate struct {
-		word   string
-		weight int
-	}
-	candidates := make([]candidate, 0, len(list))
-	total := 0
-	for _, w := range list {
-		if slices.Contains(excluded, w) {
-			continue
-		}
-		weight := 1 + wordWeakScore(w, weakChars)
-		candidates = append(candidates, candidate{w, weight})
-		total += weight
-	}
-	if len(candidates) == 0 {
-		return list[rand.Intn(len(list))] // degenerate case: everything excluded
-	}
-
-	r := rand.Intn(total)
-	for _, c := range candidates {
-		r -= c.weight
-		if r < 0 {
-			return c.word
-		}
-	}
-	return candidates[len(candidates)-1].word // unreachable in practice
 }
 
 // sentenceEnders are the marks that close a sentence, weighted toward '.'.
@@ -249,11 +262,14 @@ func Punctuate(list []string) []string {
 	return out
 }
 
+// capitalize upper-cases w's first letter, which may take more than one
+// byte (é, ж).
 func capitalize(w string) string {
-	if w == "" {
+	r, size := utf8.DecodeRuneInString(w)
+	if size == 0 {
 		return w
 	}
-	return strings.ToUpper(w[:1]) + w[1:]
+	return string(unicode.ToUpper(r)) + w[size:]
 }
 
 // baseForm strips Punctuate's trailing punctuation and capitalization,
@@ -261,10 +277,11 @@ func capitalize(w string) string {
 // against, regardless of whether the caller's history was punctuated.
 func baseForm(w string) string {
 	w = strings.TrimRight(w, ".!?,")
-	if w == "" {
+	r, size := utf8.DecodeRuneInString(w)
+	if size == 0 {
 		return w
 	}
-	return strings.ToLower(w[:1]) + w[1:]
+	return string(unicode.ToLower(r)) + w[size:]
 }
 
 func endsSentence(w string) bool {

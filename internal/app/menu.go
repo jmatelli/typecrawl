@@ -11,6 +11,7 @@ import (
 	"github.com/jmatelli/typecrawl/internal/challenge"
 	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/textsource"
 	"github.com/jmatelli/typecrawl/internal/theme"
 	"github.com/jmatelli/typecrawl/internal/words"
 )
@@ -31,15 +32,15 @@ func modeString(m testMode) string {
 	return "time"
 }
 
-// sourceString converts the quotes-mode toggle to the string form persisted
-// in the DB (personal bests, test history) -- "random" and "quotes" are
-// tracked as separate personal bests at the same mode/target, since typing
-// fixed quote text is a meaningfully different challenge from random words.
-func sourceString(quotes bool) string {
-	if quotes {
-		return "quotes"
+// runSource is the source a run with these choices types from: the
+// player's own file when one is set, otherwise quotes or random words.
+// Every place that stores or looks up a run's source goes through it, so
+// a personal best is always written and read under the same key.
+func runSource(quotes bool, custom textsource.Source) textsource.Source {
+	if custom.Custom() {
+		return custom
 	}
-	return "random"
+	return textsource.Builtin(quotes)
 }
 
 var (
@@ -67,7 +68,15 @@ type menuModel struct {
 	zenMode        bool
 	focusWeak      bool
 	quotes         bool // draws exercise text from cached quotes instead of random words
-	battle         bool // shows the battle strip below the words
+	// customSources are the profile's saved word lists and texts, and
+	// customIdx the one selected, or -1 when the source is quotes or the
+	// random words.
+	customSources []textsource.Source
+	customIdx     int
+	battle        bool // shows the battle strip below the words
+	// errMsg explains why the last start didn't happen, such as a saved
+	// file that has since been moved. Any key clears it.
+	errMsg string
 	// keyboardLayout isn't shown or changed here (the Weak Keys screen does
 	// that), but it's carried so saveSettings doesn't reset it.
 	keyboardLayout string
@@ -89,6 +98,19 @@ func newMenuModel(profile *storage.Profile, db *sql.DB) menuModel {
 	wordOpts := []int{50, 100, 200}
 
 	settings, _ := storage.LoadSettings(db, profile.ID) // best-effort; zero value still yields sane defaults
+	saved, _ := storage.ListCustomSources(db, profile.ID)
+	customIdx := -1
+	var customSources []textsource.Source
+	for _, key := range saved {
+		src, ok := textsource.Parse(key)
+		if !ok || !src.Custom() {
+			continue
+		}
+		if key == settings.CustomSource {
+			customIdx = len(customSources)
+		}
+		customSources = append(customSources, src)
+	}
 	streakDays, _ := storage.CurrentStreak(db, profile.ID, time.Now())
 	weekly, week, weeklyClaimed := weeklyStatus(db, profile.ID, time.Now())
 
@@ -109,6 +131,8 @@ func newMenuModel(profile *storage.Profile, db *sql.DB) menuModel {
 		zenMode:        settings.ZenMode,
 		focusWeak:      settings.FocusWeak,
 		quotes:         settings.Quotes,
+		customSources:  customSources,
+		customIdx:      customIdx,
 		battle:         !settings.HideBattleStrip,
 
 		keyboardLayout: settings.KeyboardLayout,
@@ -133,7 +157,54 @@ func (m menuModel) saveSettings() {
 
 		HideBattleStrip: !m.battle,
 		KeyboardLayout:  m.keyboardLayout,
+		CustomSource:    m.customKey(),
 	})
+}
+
+// custom is the selected saved source, or the zero Source when it's
+// quotes or the random words.
+func (m menuModel) custom() textsource.Source {
+	if m.customIdx < 0 || m.customIdx >= len(m.customSources) {
+		return textsource.Source{}
+	}
+	return m.customSources[m.customIdx]
+}
+
+func (m menuModel) customKey() string {
+	if c := m.custom(); c.Custom() {
+		return c.Key()
+	}
+	return ""
+}
+
+// source is what the next run types from.
+func (m menuModel) source() textsource.Source {
+	return runSource(m.quotes, m.custom())
+}
+
+// fixedText reports whether the source is text typed as written (quotes
+// or a player's text): punctuation is part of it, and there's nothing for
+// weak-key focus to pick.
+func (m menuModel) fixedText() bool {
+	k := m.source().Kind
+	return k == textsource.Quotes || k == textsource.Text
+}
+
+// nextSource moves to the next source in the order random words, quotes,
+// then each saved file, and round again.
+func (m *menuModel) nextSource() {
+	switch {
+	case m.customIdx >= 0:
+		m.customIdx++
+		if m.customIdx >= len(m.customSources) {
+			m.customIdx = -1
+			m.quotes = false
+		}
+	case m.quotes && len(m.customSources) > 0:
+		m.customIdx = 0
+	default:
+		m.quotes = !m.quotes
+	}
 }
 
 // currentTarget returns the duration or word count currently selected,
@@ -152,6 +223,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	m.errMsg = ""
 
 	switch keyMsg.String() {
 	case "tab", "m":
@@ -180,13 +252,14 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		target := m.currentTarget()
 		punctuation := m.punctuation
 		zenMode := m.zenMode
-		focusWeak := m.focusWeak
+		focusWeak := m.focusWeak && !m.fixedText()
 		quotes := m.quotes
+		custom := m.custom()
 		return m, func() tea.Msg {
-			return startTypingMsg{mode: mode, target: target, punctuation: punctuation, zenMode: zenMode, focusWeak: focusWeak, quotes: quotes}
+			return startTypingMsg{mode: mode, target: target, punctuation: punctuation, zenMode: zenMode, focusWeak: focusWeak, quotes: quotes, custom: custom}
 		}
 	case "c":
-		if !m.quotes { // punctuation is implied whenever quotes mode is on
+		if !m.fixedText() { // punctuation is implied whenever the text is typed as written
 			m.punctuation = !m.punctuation
 			m.saveSettings()
 		}
@@ -194,7 +267,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.zenMode = !m.zenMode
 		m.saveSettings()
 	case "f":
-		if !m.quotes { // weak-key biasing has no meaning over fixed quote text
+		if !m.fixedText() { // weak-key biasing has no meaning over fixed text
 			m.focusWeak = !m.focusWeak
 			m.saveSettings()
 		}
@@ -205,8 +278,17 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// quotes is on (see the View below and newTypingModel), so forcing
 		// it into m.punctuation too would just leave it stuck "on" after
 		// quotes mode is switched back off again.
-		m.quotes = !m.quotes
+		m.nextSource()
 		m.saveSettings()
+	case "x":
+		// Forget the selected saved file. Its runs and personal bests stay.
+		if c := m.custom(); c.Custom() {
+			_ = storage.ForgetCustomSource(m.db, m.profile.ID, c.Key())
+			m.customSources = append(m.customSources[:m.customIdx:m.customIdx], m.customSources[m.customIdx+1:]...)
+			m.customIdx = -1
+			m.quotes = false
+			m.saveSettings()
+		}
 	case "b":
 		m.battle = !m.battle
 		m.saveSettings()
@@ -260,7 +342,7 @@ func (m menuModel) View() string {
 	}
 
 	pbLine := "Your best: " + dimStyle.Render("no record yet for this mode/duration")
-	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(m.mode), m.currentTarget(), sourceString(m.quotes)); err == nil && pb != nil {
+	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(m.mode), m.currentTarget(), m.source().Key()); err == nil && pb != nil {
 		pbLine = fmt.Sprintf("Your best: %s WPM (%s accuracy, %s)",
 			boldStyle.Render(fmt.Sprintf("%.1f", pb.WPM)),
 			boldStyle.Render(fmt.Sprintf("%.0f%%", pb.Accuracy)),
@@ -268,25 +350,26 @@ func (m menuModel) View() string {
 		)
 	}
 
-	sourceStr := "Random words"
-	if m.quotes {
-		sourceStr = "Quotes"
+	sourceStr := m.source().Name()
+	sourceHint := " (s)"
+	if m.custom().Custom() {
+		sourceHint = " (s, x: forget)"
 	}
 	battleStr := "Off"
 	if m.battle {
 		battleStr = "On"
 	}
-	sourceLine := fmt.Sprintf("Source: %s (s)   Battle strip: %s (b)", boldStyle.Render(sourceStr), boldStyle.Render(battleStr))
+	sourceLine := fmt.Sprintf("Source: %s%s   Battle strip: %s (b)", boldStyle.Render(sourceStr), sourceHint, boldStyle.Render(battleStr))
 
 	punctStr, zenStr, focusStr := "Off", "Off", "Off"
-	if m.punctuation || m.quotes {
+	if m.punctuation || m.fixedText() {
 		punctStr = "On"
 	}
 	if m.zenMode {
 		zenStr = "On"
 	}
 	focusHint := " (f)"
-	if m.quotes {
+	if m.fixedText() {
 		focusStr = "N/A"
 		focusHint = ""
 	} else if m.focusWeak {
@@ -299,13 +382,18 @@ func (m menuModel) View() string {
 
 	help := helpStyle.Render("enter: start   p: profile   u: switch profile   q: quit")
 
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
+	lines := []string{
 		title, profileLine, streakLine, challengeLine, "",
 		modeLine, targetLine, pbLine, "",
 		sourceLine, togglesLine, "",
-		help,
-	)
+	}
+	if m.source().Custom() {
+		lines = append(lines[:len(lines)-1], dimStyle.Render("Your own text earns XP and its own bests, but no achievements or challenges."), "")
+	}
+	if m.errMsg != "" {
+		lines = append(lines, wrongStyle.Render(m.errMsg), "")
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, append(lines, help)...)
 }
 
 // weeklyLine shows this week's challenge and the progress toward it.

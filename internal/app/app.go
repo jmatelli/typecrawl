@@ -20,6 +20,7 @@ import (
 	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/textsource"
 )
 
 // scrollKeyMap restricts the viewport to PgUp/PgDn and Ctrl+U/Ctrl+D
@@ -123,6 +124,9 @@ type LaunchOptions struct {
 	ZenMode     bool
 	FocusWeak   bool
 	Quotes      bool // draws exercise text from cached quotes instead of random words
+	// Custom is a player's word list or text to type from instead; it's
+	// also saved to the profile, so the menu offers it from then on.
+	Custom textsource.Source
 	// Clipboard is the terminal the program draws to, where sharing a run
 	// sends it (see copyToClipboard). nil disables copying.
 	Clipboard io.Writer
@@ -163,6 +167,11 @@ func NewWithOptions(db *sql.DB, profiles []*storage.Profile, opts LaunchOptions)
 	}
 	m.profile = profile
 	m.state = stateMenu
+	if opts.Custom.Custom() {
+		if err := storage.SaveCustomSource(db, profile.ID, opts.Custom.Key(), time.Now()); err != nil {
+			return Model{}, fmt.Errorf("saving %s: %w", opts.Custom.Name(), err)
+		}
+	}
 	m.menu = newMenuModel(profile, db)
 
 	if opts.Mode == "" {
@@ -175,7 +184,7 @@ func NewWithOptions(db *sql.DB, profiles []*storage.Profile, opts LaunchOptions)
 	m.pendingAutoStart = &startTypingMsg{
 		mode: mode, target: opts.Target,
 		punctuation: opts.Punctuation, zenMode: opts.ZenMode, focusWeak: opts.FocusWeak,
-		quotes: opts.Quotes,
+		quotes: opts.Quotes, custom: opts.Custom,
 	}
 	return m, nil
 }
@@ -235,24 +244,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // (see pendingAutoStart) can reuse the exact same logic once the terminal
 // width is known, instead of duplicating it.
 func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
+	source := runSource(msg.quotes, msg.custom)
+	var customWords []string
+	if source.Custom() {
+		// Read when the run starts, so edits to the file show up. A file
+		// that has gone missing since it was saved stops the start here
+		// rather than giving the player something they didn't pick.
+		loaded, err := textsource.Load(source)
+		if err != nil {
+			m.menu.errMsg = fmt.Sprintf("Couldn't read %s: %v", source.Name(), err)
+			m.state = stateMenu
+			return m, nil
+		}
+		customWords = loaded
+	}
 	var weakChars map[rune]int
 	if msg.focusWeak {
 		weakChars, _ = storage.WeakCharWeights(m.db, m.profile.ID) // best-effort; nil falls back to plain selection
 	}
 	var ghostPaceMS []int
 	var ghostWPMSeries []float64
-	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(msg.mode), msg.target, sourceString(msg.quotes)); err == nil && pb != nil {
+	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(msg.mode), msg.target, source.Key()); err == nil && pb != nil {
 		ghostPaceMS = pb.GhostPace         // best-effort; nil just means no ghost to race
 		ghostWPMSeries = pb.GhostWPMSeries // best-effort; nil just means no ghost curve to overlay on the results graph
 	}
 	var quotePool []quotes.Quote
-	if msg.quotes {
+	if source.Kind == textsource.Quotes {
 		quotePool = loadQuotePool(m.db)
 	}
 	m.typing = newTypingModel(
 		msg.mode, msg.target, m.width, game.MaxHP(m.profile.Level, m.profile.Prestige), game.DifficultyLevel(m.profile.Level, m.profile.Prestige),
-		msg.punctuation, msg.zenMode, msg.focusWeak, msg.quotes, quotePool, weakChars, ghostPaceMS, ghostWPMSeries,
+		msg.punctuation, msg.zenMode, msg.focusWeak, source.Kind == textsource.Quotes, quotePool, weakChars, ghostPaceMS, ghostWPMSeries,
 	)
+	if source.Custom() {
+		m.typing = m.typing.withCustomSource(source, customWords)
+	}
 	// The battle strip follows the profile's saved setting, so quick
 	// launches from the command line get it too.
 	settings, _ := storage.LoadSettings(m.db, m.profile.ID) // best-effort; the default shows the strip
@@ -369,7 +395,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		now := time.Now()
 		modeStr := modeString(msg.mode)
-		sourceStr := sourceString(msg.quotes)
+		source := runSource(msg.quotes, msg.custom)
+		sourceStr := source.Key()
+		// A run on the player's own text earns XP and keeps its own
+		// personal bests, but counts toward no achievement or challenge:
+		// a word list can make those trivial. The storage queries behind
+		// them leave such runs out; the profile's own counters are left
+		// alone below.
+		ownText := source.Custom()
 
 		// Snapshot "before" state for the achievement-unlock diff below,
 		// ahead of any mutation this run causes.
@@ -408,9 +441,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var challengeBonusXP int
 		var challengeCompleted bool
 		var todayChallenge = challenge.Today(now)
-		if !msg.ko {
+		if !msg.ko && !ownText {
 			run := challenge.Run{
-				Mode: modeStr, Target: msg.target, Punctuation: msg.punctuation, ZenMode: msg.zenMode, Quotes: msg.quotes,
+				Mode: modeStr, Target: msg.target, Punctuation: msg.punctuation, ZenMode: msg.zenMode, Quotes: source.Kind == textsource.Quotes,
 				WPM: msg.result.WPM, Accuracy: msg.result.Accuracy, KO: msg.ko,
 				BestWordStreak: msg.bestCombo, Hits: msg.hitCount,
 				GoldenWords: msg.specialLanded.golden, GreenWords: msg.specialLanded.green, BlueWords: msg.specialLanded.blue,
@@ -430,7 +463,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the streak multiplier, and a knockout can't claim it.
 		var weeklyBonusXP int
 		weekly, week, weeklyClaimed := weeklyStatus(m.db, m.profile.ID, now)
-		if !msg.ko && !weeklyClaimed && weekly.Completed(week) {
+		if !msg.ko && !ownText && !weeklyClaimed && weekly.Completed(week) {
 			if ok, err := storage.ClaimWeeklyChallenge(m.db, m.profile.ID, challenge.WeekKey(now), now); err == nil && ok {
 				weeklyBonusXP = weekly.XPBonus
 			}
@@ -454,13 +487,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A run that ends in KO doesn't get to set a new word-streak record
 		// -- same reasoning as XP: getting overwhelmed by mistakes shouldn't
 		// still pay out, even for an achievement earned earlier in the run.
-		newWordStreakRecord := !msg.ko && msg.bestCombo > m.profile.BestWordStreak
+		newWordStreakRecord := !msg.ko && !ownText && msg.bestCombo > m.profile.BestWordStreak
 		if newWordStreakRecord {
 			m.profile.BestWordStreak = msg.bestCombo
 		}
-		if msg.ko {
+		switch {
+		case ownText:
+		case msg.ko:
 			m.profile.KOCount++
-		} else {
+		default:
 			m.profile.SuccessCount++
 		}
 		// Best-effort; gameplay continues even if the write fails. A stale
@@ -505,7 +540,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		run.NewPersonalBest = isNewPB
 		m.runs = append(m.runs, sessionRun{summary: run})
 
-		afterProgress := buildAchievementProgress(m.db, m.profile, streakDays, personalBest)
+		// The speed achievements go by the best WPM on the built-in text,
+		// which a custom run leaves where it was.
+		achievementBestWPM := max(beforeBestWPM, personalBest)
+		if ownText {
+			achievementBestWPM = beforeBestWPM
+		}
+		afterProgress := buildAchievementProgress(m.db, m.profile, streakDays, achievementBestWPM)
 		if unlocked := newlyUnlocked(beforeProgress, afterProgress); len(unlocked) > 0 {
 			m.achievementUnlock = newAchievementUnlockModel(unlocked)
 			m.state = stateAchievementUnlock

@@ -64,7 +64,8 @@ typecrawl
 
 On first run you'll be prompted to create a profile. From there:
 
-- **Menu**: `tab`/`m` switch mode, `←`/`→` or `h`/`l` change duration/word count, `c`/`z`/`f` toggle
+- **Menu**: `tab`/`m` switch mode, `←`/`→` or `h`/`l` change duration/word count, `s` cycles the text
+  source (random words, quotes, then your saved files), `x` forgets the selected file, `c`/`z`/`f` toggle
   punctuation/zen/focus-weak, `b` toggles the battle strip, `enter` starts, `p` opens your profile, `u`
   switches profile.
 - **Typing**: type the words; `backspace` corrects mistakes (even across completed words); `esc` quits
@@ -83,6 +84,29 @@ typecrawl --profile Alice --time 30 --punctuation
 typecrawl --list-profiles
 typecrawl --profile Alice --export backup.json
 ```
+
+### Your own text
+
+Type from a file of your own instead of the built-in words: another language, code, numbers or symbols.
+
+```sh
+typecrawl --profile Alice --time 60 --wordlist ~/french-words.txt   # words drawn at random
+typecrawl --profile Alice --words 200 --text ~/chapter-one.txt      # typed in order
+```
+
+- **Word list**: words separated by spaces or line breaks, drawn at random like the built-in words.
+  Repeated words count once. `--punctuation` and `--focus-weak` work as usual.
+- **Text**: typed in order from the start, as written, so punctuation is always on. A run longer than the
+  text goes back to the beginning.
+- **Files**: UTF-8 text of up to 4 MB. Accented letters, other alphabets and wide characters such as
+  Japanese work. Curly quotes and dashes are turned into the keys you'd type, as in quotes mode.
+- **Saved**: a file you launch with is saved to the profile, and the menu's `s` key offers it from then
+  on. The file is read again at the start of every run, so edits show up. If it has been moved, the menu
+  says so; `x` forgets it.
+- **Rewards**: runs on your own text earn XP, and each file keeps its own personal bests and ghost.
+  They don't count toward achievements, daily or weekly challenges, or the profile's exercise and
+  knockout counts, because a list of very short words would make those trivial. They do count as
+  practice for the daily streak.
 
 ### Sharing a run
 
@@ -115,7 +139,8 @@ typecrawl --profile Alice --time 30 --json | jq .wpm
 | `profile` | profile name |
 | `finished_at` | when the run ended, RFC 3339 |
 | `mode`, `target` | `"time"` with a target in seconds, or `"words"` with a word count |
-| `source` | `"random"` words or `"quotes"` |
+| `source` | `"random"` words, `"quotes"`, or your own `"wordlist"` or `"text"` |
+| `source_name` | the word list's or text's file name, without its directory; absent for the others |
 | `punctuation`, `zen` | whether those options were on |
 | `wpm`, `accuracy` | words per minute and accuracy in percent, to two decimals |
 | `duration_seconds` | how long the run took |
@@ -133,7 +158,8 @@ A session with no finished run prints nothing.
 
 `--export` writes everything a profile owns to a JSON file: level and XP, test history, personal bests
 and ghost runs, settings, the daily streak and activity heatmap, weak-key counts, and daily and weekly
-challenge claims. `--import` creates a new profile from that file, on the same machine or another one:
+challenge claims, and your saved word lists and texts. Those are saved by path, so the files
+themselves aren't in the backup. `--import` creates a new profile from that file, on the same machine or another one:
 
 ```sh
 typecrawl --profile Alice --export backup.json
