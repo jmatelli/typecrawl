@@ -209,7 +209,9 @@ func TestSaveKeyboardLayoutWithNoSavedSettings(t *testing.T) {
 
 func TestRecordActivityIncrementsSameDayCount(t *testing.T) {
 	db, p := newTestDB(t)
-	now := time.Now()
+	// Midday, so the later two stay on the same day whenever this runs.
+	y, mo, d := time.Now().Date()
+	now := time.Date(y, mo, d, 12, 0, 0, 0, time.Local)
 	RecordActivity(db, p.ID, now)
 	RecordActivity(db, p.ID, now.Add(time.Hour))
 	RecordActivity(db, p.ID, now.Add(2*time.Hour))

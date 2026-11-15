@@ -50,7 +50,7 @@ func seedFullProfile(t *testing.T, db *sql.DB) *Profile {
 	}
 	p.Prestige = 2
 
-	must(SaveSettings(db, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, Punctuation: true, Quotes: true, HideBattleStrip: true, KeyboardLayout: "azerty"}))
+	must(SaveSettings(db, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, Punctuation: true, Quotes: true, HideBattleStrip: true, KeyboardLayout: "azerty", CustomSource: "text:/home/alice/book.txt"}))
 
 	day1 := time.Date(2026, 10, 1, 23, 15, 0, 0, backupZone)
 	day2 := time.Date(2026, 10, 2, 5, 40, 0, 0, backupZone)
@@ -63,6 +63,10 @@ func seedFullProfile(t *testing.T, db *sql.DB) *Profile {
 	must(err)
 	_, err = RecordPersonalBest(db, p.ID, "words", 50, "quotes", 61.25, 100, nil, nil, day2)
 	must(err)
+	_, err = RecordPersonalBest(db, p.ID, "time", 15, "wordlist:/home/alice/français.txt", 70, 100, nil, nil, day2)
+	must(err)
+	must(SaveCustomSource(db, p.ID, "wordlist:/home/alice/français.txt", day1))
+	must(SaveCustomSource(db, p.ID, "text:/home/alice/book.txt", day2))
 
 	must(RecordActivity(db, p.ID, day1))
 	must(RecordActivity(db, p.ID, day1))
@@ -109,7 +113,7 @@ func comparable(t *testing.T, b *Backup) string {
 func rowCounts(t *testing.T, db *sql.DB) map[string]int {
 	t.Helper()
 	out := map[string]int{}
-	for _, table := range []string{"profiles", "settings", "test_history", "personal_bests", "daily_activity", "char_mistakes", "daily_challenge_claims"} {
+	for _, table := range []string{"profiles", "settings", "test_history", "personal_bests", "daily_activity", "char_mistakes", "daily_challenge_claims", "custom_sources"} {
 		var n int
 		if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
 			t.Fatal(err)
@@ -293,6 +297,11 @@ func TestImportProfileRejectsInvalidBackupsAndChangesNothing(t *testing.T) {
 		"control char in layout": func(b *Backup) { b.Settings.KeyboardLayout = "dvorak\x1b[2J" },
 		"unknown history mode":   func(b *Backup) { b.History[0].Mode = "" },
 		"unknown history source": func(b *Backup) { b.History[1].Source = "books" },
+		"empty custom path":      func(b *Backup) { b.History[1].Source = "wordlist:" },
+		"control char in path":   func(b *Backup) { b.PersonalBests[0].Source = "text:/a\x1b[2J" },
+		"built-in saved source":  func(b *Backup) { b.CustomSources[0] = "quotes" },
+		"duplicate saved source": func(b *Backup) { b.CustomSources = append(b.CustomSources, b.CustomSources[0]) },
+		"bad selected source":    func(b *Backup) { b.Settings.CustomSource = "random" },
 		"accuracy over 100":      func(b *Backup) { b.History[0].Accuracy = 140 },
 		"history without a date": func(b *Backup) { b.History[2].CreatedAt = time.Time{} },
 		"negative best wpm":      func(b *Backup) { b.PersonalBests[0].WPM = -3 },

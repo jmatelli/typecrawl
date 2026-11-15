@@ -14,6 +14,7 @@ import (
 
 	"github.com/jmatelli/typecrawl/internal/app"
 	"github.com/jmatelli/typecrawl/internal/storage"
+	"github.com/jmatelli/typecrawl/internal/textsource"
 	"github.com/jmatelli/typecrawl/internal/theme"
 )
 
@@ -24,6 +25,27 @@ func findProfileByName(profiles []*storage.Profile, name string) *storage.Profil
 		}
 	}
 	return nil
+}
+
+// customSource resolves --wordlist or --text, at most one of which is
+// set, and checks the file can be typed from before the game starts. It
+// returns the zero Source when neither is set.
+func customSource(wordlist, text string) (textsource.Source, error) {
+	kind, path, flagName := textsource.WordList, wordlist, "--wordlist"
+	if text != "" {
+		kind, path, flagName = textsource.Text, text, "--text"
+	}
+	if path == "" {
+		return textsource.Source{}, nil
+	}
+	src, err := textsource.Resolve(kind, path)
+	if err != nil {
+		return textsource.Source{}, err
+	}
+	if _, err := textsource.Load(src); err != nil {
+		return textsource.Source{}, fmt.Errorf("%s %s: %w", flagName, path, err)
+	}
+	return src, nil
 }
 
 // version is overridden at release build time via
@@ -39,6 +61,8 @@ func main() {
 	zenFlag := flag.Bool("zen", false, "quick-launch: enable zen mode (requires --time or --words)")
 	focusWeakFlag := flag.Bool("focus-weak", false, "quick-launch: bias word choice toward your weakest keys (requires --time or --words)")
 	quotesFlag := flag.Bool("quotes", false, "quick-launch: use quotes instead of random words (implies punctuation; requires --time or --words)")
+	wordlistFlag := flag.String("wordlist", "", "quick-launch: draw words at random from this file of your own, separated by spaces or lines (requires --time or --words); it's saved to the profile for the menu")
+	textFlag := flag.String("text", "", "quick-launch: type this text file of your own in order (requires --time or --words); it's saved to the profile for the menu")
 	listProfilesFlag := flag.Bool("list-profiles", false, "list saved profiles and exit")
 	exportFlag := flag.String("export", "", "export a profile to this JSON file path and exit (requires --profile)")
 	jsonFlag := flag.Bool("json", false, "print each finished run as a line of JSON on standard output when the program exits (the game is drawn on standard error)")
@@ -62,8 +86,27 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: --time/--words requires --profile")
 		os.Exit(1)
 	}
-	if (*punctuationFlag || *zenFlag || *focusWeakFlag || *quotesFlag) && !hasMode {
-		fmt.Fprintln(os.Stderr, "error: --punctuation/--zen/--focus-weak/--quotes requires --time or --words")
+	if (*punctuationFlag || *zenFlag || *focusWeakFlag || *quotesFlag || *wordlistFlag != "" || *textFlag != "") && !hasMode {
+		fmt.Fprintln(os.Stderr, "error: --punctuation/--zen/--focus-weak/--quotes/--wordlist/--text requires --time or --words")
+		os.Exit(1)
+	}
+	sources := 0
+	for _, set := range []bool{*quotesFlag, *wordlistFlag != "", *textFlag != ""} {
+		if set {
+			sources++
+		}
+	}
+	if sources > 1 {
+		fmt.Fprintln(os.Stderr, "error: specify only one of --quotes, --wordlist or --text")
+		os.Exit(1)
+	}
+	if *textFlag != "" && *focusWeakFlag {
+		fmt.Fprintln(os.Stderr, "error: --focus-weak cannot be combined with --text (a text is typed in order, so there's no word choice to bias)")
+		os.Exit(1)
+	}
+	custom, err := customSource(*wordlistFlag, *textFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 	if *quotesFlag && *focusWeakFlag {
@@ -175,7 +218,7 @@ func main() {
 		screen = os.Stderr
 	}
 
-	opts := app.LaunchOptions{ProfileName: *profileFlag, Punctuation: *punctuationFlag, ZenMode: *zenFlag, FocusWeak: *focusWeakFlag, Quotes: *quotesFlag, Clipboard: screen}
+	opts := app.LaunchOptions{ProfileName: *profileFlag, Punctuation: *punctuationFlag, ZenMode: *zenFlag, FocusWeak: *focusWeakFlag, Quotes: *quotesFlag, Custom: custom, Clipboard: screen}
 	if *timeFlag != 0 {
 		opts.Mode = "time"
 		opts.Target = *timeFlag

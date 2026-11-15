@@ -16,6 +16,7 @@ import (
 	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/stats"
+	"github.com/jmatelli/typecrawl/internal/textsource"
 	"github.com/jmatelli/typecrawl/internal/theme"
 	"github.com/jmatelli/typecrawl/internal/words"
 )
@@ -103,6 +104,11 @@ type typingModel struct {
 	// punctuation is part of the text, not an optional flourish.
 	quotesMode bool
 	quotePool  []quotes.Quote
+
+	// custom is the player's own word list or text, when the run uses
+	// one (see withCustomSource), and customWords its words as loaded.
+	custom      textsource.Source
+	customWords []string
 
 	// ghostPaceMS is the personal best's per-word cumulative elapsed
 	// milliseconds for this exact mode/target, if one exists -- raced live
@@ -214,18 +220,48 @@ func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation,
 	return m
 }
 
-// genWords produces n more exercise words, either from quotePool (whole
-// quotes concatenated end to end) or from internal/words' tiered random
-// lists (optionally dressed up with sentence-style punctuation), depending
-// on quotesMode. tail, when given, is the end of the already-generated word
-// list -- see words.ForLevel -- and is only meaningful for the random-words
-// path; quotes carry their own punctuation and have no equivalent
-// immediate-repeat concern worth tracking across calls (see quotes.Words).
-func (m typingModel) genWords(n int, tail ...string) []string {
-	if m.quotesMode {
-		return quotes.Words(m.quotePool, n)
+// withCustomSource switches the run to the player's own file: words, a
+// word list's or a text's words as textsource.Load returned them. It
+// replaces the words the constructor generated. Like a quote, a text
+// carries its own punctuation, so it counts as a punctuation run and has
+// nothing for weak-key focus to bias.
+func (m typingModel) withCustomSource(src textsource.Source, words []string) typingModel {
+	m.custom, m.customWords = src, words
+	m.quotesMode, m.quotePool = false, nil
+	if src.Kind == textsource.Text {
+		m.punctuation = true
+		m.focusWeak, m.weakChars = false, nil
 	}
-	list := words.ForLevelWeak(n, m.level, m.weakChars, tail...)
+	n := m.target
+	if m.mode == modeTime {
+		n = 300
+	}
+	m.wordList = m.genWords(n)
+	m.goldenWordIdx = rollGoldenWordIndex(len(m.wordList))
+	return m
+}
+
+// genWords produces n more exercise words: from the player's own text in
+// order, drawn from their word list, from quotePool (whole quotes
+// concatenated end to end), or from internal/words' tiered random lists.
+// Drawn words can be dressed up with sentence-style punctuation. tail,
+// when given, is the already-generated word list: drawn words use its end
+// to avoid repeats (see words.ForLevel), and a text carries on from
+// however many words it already holds. Quotes carry their own punctuation
+// and have no equivalent immediate-repeat concern worth tracking across
+// calls (see quotes.Words).
+func (m typingModel) genWords(n int, tail ...string) []string {
+	var list []string
+	switch {
+	case m.custom.Kind == textsource.Text:
+		return textsource.InOrder(m.customWords, len(tail), n)
+	case m.custom.Kind == textsource.WordList:
+		list = words.FromList(m.customWords, n, m.weakChars, tail...)
+	case m.quotesMode:
+		return quotes.Words(m.quotePool, n)
+	default:
+		list = words.ForLevelWeak(n, m.level, m.weakChars, tail...)
+	}
 	if m.punctuation {
 		list = words.Punctuate(list)
 	}
@@ -639,6 +675,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 	hitCount := m.hitCount
 	punctuation, zenMode := m.punctuation, m.zenMode
 	quotesMode := m.quotesMode
+	custom := m.custom
 	wordsTyped := len(m.typedWords)
 	ghostWPMSeries := m.ghostWPMSeries
 	msg := finishTypingMsg{
@@ -646,7 +683,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 		xpBonus: xpBonus, bestCombo: bestCombo,
 		mode: mode, target: target, charMistakes: charMistakes,
 		hitCount:    hitCount,
-		punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, wordsTyped: wordsTyped,
+		punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, custom: custom, wordsTyped: wordsTyped,
 		ghostWPMSeries: ghostWPMSeries,
 		specialLanded:  m.specialLanded,
 	}
@@ -668,7 +705,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 }
 
 // wrapWords greedily packs list[start:] into up to maxLines lines of at
-// most width characters each. It returns the word indices per line and the
+// most width columns each. It returns the word indices per line and the
 // index of the first word not included (start of the next page).
 func wrapWords(list []string, start, width, maxLines int) (lines [][]int, nextStart int) {
 	if width <= 0 {
@@ -678,7 +715,8 @@ func wrapWords(list []string, start, width, maxLines int) (lines [][]int, nextSt
 	lineWidth := 0
 	i := start
 	for i < len(list) {
-		addLen := utf8.RuneCountInString(list[i])
+		// Columns, not characters: 日 takes two.
+		addLen := lipgloss.Width(list[i])
 		if lineWidth > 0 {
 			addLen++ // separating space
 		}

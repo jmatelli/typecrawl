@@ -129,7 +129,7 @@ func nonEmpty(pool []Quote) []Quote {
 // trailing period first if the quote doesn't already end in one -- most do,
 // but not all source material does.
 func wordsOf(q Quote) []string {
-	text := strings.TrimSpace(typeable.Replace(norm.NFC.String(q.Text)))
+	text := strings.TrimSpace(Typeable(q.Text))
 	if !endsSentence(text) {
 		text += "."
 	}
@@ -154,6 +154,12 @@ var typeable = strings.NewReplacer(
 	// invisible: zero-width space, soft hyphen, word joiner, byte order mark
 	"\u200B", "", "\u00AD", "", "\u2060", "", "\uFEFF", "",
 )
+
+// Typeable returns s in composed form (NFC) with typeable's replacements
+// applied: what a player can actually type on a keyboard.
+func Typeable(s string) string {
+	return typeable.Replace(norm.NFC.String(s))
+}
 
 // endsSentence reports whether s ends a sentence, looking past closing
 // quotes and brackets: `"Go."` ends one.

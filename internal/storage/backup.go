@@ -8,6 +8,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/jmatelli/typecrawl/internal/textsource"
 )
 
 // BackupVersion is the format version written by ExportProfile.
@@ -72,6 +74,10 @@ type Backup struct {
 	// WeeklyChallengeClaims is absent from backups made before weekly
 	// challenges existed, which then import with no weekly claims.
 	WeeklyChallengeClaims []WeeklyChallengeClaim `json:"weekly_challenge_claims,omitempty"`
+	// CustomSources are the profile's saved word lists and texts, as
+	// textsource keys, oldest first. Only the paths travel, not the files.
+	// Absent from backups made before custom sources existed.
+	CustomSources []string `json:"custom_sources,omitempty"`
 }
 
 // IsPartial reports whether b predates version 2 and so lacks settings,
@@ -128,8 +134,8 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 
 	var s Settings
 	var punctuation, zenMode, focusWeak, quotes, hideBattleStrip int
-	err = tx.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout FROM settings WHERE profile_id = ?`, id).
-		Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip, &s.KeyboardLayout)
+	err = tx.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout, custom_source FROM settings WHERE profile_id = ?`, id).
+		Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip, &s.KeyboardLayout, &s.CustomSource)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		s = defaultSettings()
@@ -229,6 +235,18 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 		return nil, err
 	}
 
+	err = queryEach(tx, `SELECT source FROM custom_sources WHERE profile_id = ? ORDER BY added_at, source`, id, func(rows *sql.Rows) error {
+		var source string
+		if err := rows.Scan(&source); err != nil {
+			return err
+		}
+		b.CustomSources = append(b.CustomSources, source)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return b, nil
 }
 
@@ -297,9 +315,9 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 
 	if s := b.Settings; s != nil {
 		_, err := tx.Exec(`
-			INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, s.Mode, s.Duration, s.WordCount, boolInt(s.Punctuation), boolInt(s.ZenMode), boolInt(s.FocusWeak), boolInt(s.Quotes), boolInt(s.HideBattleStrip), s.KeyboardLayout)
+			INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout, custom_source)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, s.Mode, s.Duration, s.WordCount, boolInt(s.Punctuation), boolInt(s.ZenMode), boolInt(s.FocusWeak), boolInt(s.Quotes), boolInt(s.HideBattleStrip), s.KeyboardLayout, s.CustomSource)
 		if err != nil {
 			return nil, err
 		}
@@ -347,6 +365,12 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 	}
 	for _, c := range b.WeeklyChallengeClaims {
 		if _, err := tx.Exec(`INSERT INTO weekly_challenge_claims (profile_id, week, claimed_at) VALUES (?, ?, ?)`, id, c.Week, dbTime(c.ClaimedAt)); err != nil {
+			return nil, err
+		}
+	}
+	// One second apart, so they keep their order when listed.
+	for i, source := range b.CustomSources {
+		if err := saveCustomSource(tx, id, source, b.ExportedAt.Add(time.Duration(i)*time.Second)); err != nil {
 			return nil, err
 		}
 	}
@@ -435,6 +459,9 @@ func (b *Backup) validate() error {
 		if len(s.KeyboardLayout) > 32 || strings.ContainsFunc(s.KeyboardLayout, unicode.IsControl) {
 			return errors.New("settings have a malformed keyboard layout")
 		}
+		if s.CustomSource != "" && !validCustomSource(s.CustomSource) {
+			return errors.New("settings select a malformed custom source")
+		}
 	}
 
 	for i, e := range b.History {
@@ -457,6 +484,14 @@ func (b *Backup) validate() error {
 			return fmt.Errorf("personal best %d duplicates an earlier one", i)
 		}
 		seen[k] = true
+	}
+
+	seenSources := make(map[string]bool, len(b.CustomSources))
+	for i, source := range b.CustomSources {
+		if !validCustomSource(source) || seenSources[source] {
+			return fmt.Errorf("custom source %d is malformed or a duplicate", i)
+		}
+		seenSources[source] = true
 	}
 
 	for day, count := range b.DailyActivity {
@@ -508,7 +543,23 @@ func validMode(m string) bool {
 
 // validSource also accepts "", which is what a version 1 backup carries.
 func validSource(s string) bool {
-	return s == "" || s == "random" || s == "quotes"
+	if s == "" {
+		return true
+	}
+	_, ok := textsource.Parse(s)
+	return ok && validKeyText(s)
+}
+
+// validCustomSource accepts a word list or text key.
+func validCustomSource(s string) bool {
+	src, ok := textsource.Parse(s)
+	return ok && src.Custom() && validKeyText(s)
+}
+
+// validKeyText bounds a source key: a path, but not an arbitrarily long
+// one or one with control characters in it.
+func validKeyText(s string) bool {
+	return len(s) <= 4096 && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
 }
 
 func validDay(day string) bool {

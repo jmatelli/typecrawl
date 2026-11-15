@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jmatelli/typecrawl/internal/app"
+	"github.com/jmatelli/typecrawl/internal/textsource"
 )
 
 func TestWriteExitOutputJSONLinesOnStdoutOnly(t *testing.T) {
@@ -43,4 +46,46 @@ func TestWriteExitOutputWithoutJSON(t *testing.T) {
 	if stdout.Len() != 0 || screen.Len() != 0 {
 		t.Fatalf("expected no output without --json or shared runs, got %q / %q", stdout.String(), screen.String())
 	}
+}
+
+func TestCustomSourceFlag(t *testing.T) {
+	if src, err := customSource("", ""); err != nil || src.Custom() {
+		t.Fatalf("expected no source without either flag, got %+v, %v", src, err)
+	}
+
+	dir := t.TempDir()
+	list := filepath.Join(dir, "french.txt")
+	if err := os.WriteFile(list, []byte("bonjour merci"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	src, err := customSource("french.txt", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Kind != textsource.WordList || !filepath.IsAbs(src.Path) || filepath.Base(src.Path) != "french.txt" {
+		t.Fatalf("expected the word list by its absolute path, got %+v", src)
+	}
+	if src, err := customSource("", list); err != nil || src.Kind != textsource.Text {
+		t.Fatalf("expected a text source, got %+v, %v", src, err)
+	}
+
+	for name, path := range map[string]string{
+		"missing": filepath.Join(dir, "nope.txt"),
+		"blank":   writeTemp(t, dir, "blank.txt", " \n "),
+		"binary":  writeTemp(t, dir, "bin.dat", "\xff\xfe\x00"),
+	} {
+		if _, err := customSource(path, ""); err == nil || !strings.Contains(err.Error(), path) {
+			t.Errorf("%s: expected an error naming the file, got %v", name, err)
+		}
+	}
+}
+
+func writeTemp(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
