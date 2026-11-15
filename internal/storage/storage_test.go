@@ -1182,7 +1182,11 @@ func TestWeekTotalsCountOnlyNonKORunsInRange(t *testing.T) {
 	next := monday.AddDate(0, 0, 7)
 	rec := func(when time.Time, acc float64, ko bool, source string, words int, d time.Duration) {
 		t.Helper()
-		if err := RecordTestResult(db, p.ID, 60, acc, "time", 30, ko, false, false, source, words, d, when); err != nil {
+		wpm := 60.0
+		if words == 0 {
+			wpm = 2 // an idle run: too slow to count
+		}
+		if err := RecordTestResult(db, p.ID, wpm, acc, "time", 30, ko, false, false, source, words, d, when); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1190,10 +1194,11 @@ func TestWeekTotalsCountOnlyNonKORunsInRange(t *testing.T) {
 	rec(monday.Add(5*time.Hour), 90, false, "quotes", 20, 30*time.Second) // same day
 	rec(monday.AddDate(0, 0, 2), 99, false, "quotes", 40, 60*time.Second) // another day
 	rec(monday.AddDate(0, 0, 3), 99, true, "quotes", 50, 60*time.Second)  // KO: not counted
+	rec(monday.AddDate(0, 0, 4), 100, false, "quotes", 0, 30*time.Second) // idle: not counted
 	rec(monday.Add(-time.Second), 99, false, "random", 50, time.Minute)   // previous week
 	rec(next, 99, false, "random", 50, time.Minute)                       // next week
 
-	got, err := WeekTotalsBetween(db, p.ID, monday, next)
+	got, err := WeekTotalsBetween(db, p.ID, monday, next, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

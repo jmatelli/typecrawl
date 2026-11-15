@@ -23,10 +23,11 @@ func seedWeek(t *testing.T, m Model, profile *storage.Profile) challenge.Weekly 
 		t.Skipf("this week's challenge needs %d days and only %d have started", weekly.Goal, days)
 	}
 	for i := range 12 {
-		// Spread over the days so far, oldest first, all before now.
-		when := start.Add(time.Duration(i%days) * 24 * time.Hour).Add(time.Minute)
+		// Spread over the days so far, each at the start of its day, so
+		// none falls after now or before the week began.
+		when := start.AddDate(0, 0, i%days)
 		if when.After(now) {
-			when = now.Add(-time.Minute)
+			when = start
 		}
 		if err := storage.RecordTestResult(m.db, profile.ID, 60, 99, "time", 30, false, false, false, "quotes", 100, 200*time.Second, when); err != nil {
 			t.Fatal(err)

@@ -1019,3 +1019,32 @@ func TestFinishCarriesLandedSpecialWords(t *testing.T) {
 		t.Fatalf("expected the landed counts carried over, got %+v", msg.specialLanded)
 	}
 }
+
+// Backspacing across a streak milestone and retyping it offers the same
+// special word again. Landing it again must not count twice, or one real
+// special word could be farmed into "land two special words".
+func TestRetypedSpecialWordCountsOnce(t *testing.T) {
+	m := newTestTypingModel(modeWords, greenWordTestWordList(20), 100)
+	for i := 0; i < game.GreenWordStreakInterval+2; i++ { // through the blue word
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.specialLanded.blue != 1 {
+		t.Fatalf("expected the blue word landed once, got %+v", m.specialLanded)
+	}
+	for m.wordIndex > game.GreenWordStreakInterval-1 || m.current != "" {
+		m = pressBackspace(m)
+	}
+	m = typeString(m, "w") // the milestone word again
+	m = pressSpace(m)
+	if m.blueWordIdx != game.GreenWordStreakInterval+1 {
+		t.Fatalf("expected the same blue word offered again (index %d), got %d", game.GreenWordStreakInterval+1, m.blueWordIdx)
+	}
+	for i := 0; i < 2; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.specialLanded.blue != 1 {
+		t.Fatalf("expected the re-landed blue word not to count again, got %+v", m.specialLanded)
+	}
+}

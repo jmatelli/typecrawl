@@ -139,19 +139,19 @@ func TestChallengesRejectNearMisses(t *testing.T) {
 		byID[c.ID] = c
 	}
 	cases := map[string]Run{
-		"quotes_95":  {Mode: "time", Target: 30, Quotes: true, Accuracy: 94.9},
-		"punct_95":   {Mode: "time", Target: 30, Punctuation: true, Accuracy: 94.9},
+		"quotes_95":  {Mode: "time", Target: 30, WPM: 40, Quotes: true, Accuracy: 94.9},
+		"punct_95":   {Mode: "time", Target: 30, WPM: 40, Punctuation: true, Accuracy: 94.9},
 		"wpm_70":     {Mode: "time", Target: 30, WPM: 69.9},
-		"streak_50":  {Mode: "time", Target: 30, BestWordStreak: 49},
-		"no_hits_30": {Mode: "time", Target: 30, Hits: 1},
-		"special_2":  {Mode: "time", Target: 30, GoldenWords: 1},
+		"streak_50":  {Mode: "time", Target: 30, WPM: 40, BestWordStreak: 49},
+		"no_hits_30": {Mode: "time", Target: 30, WPM: 40, Hits: 1},
+		"special_2":  {Mode: "time", Target: 30, WPM: 40, GoldenWords: 1},
 	}
 	for id, r := range cases {
 		if byID[id].Completed(r) {
 			t.Errorf("%s: a run just short of the bar completed it: %+v", id, r)
 		}
 	}
-	if byID["no_hits_30"].Completed(Run{Mode: "words", Target: 50}) {
+	if byID["no_hits_30"].Completed(Run{Mode: "words", Target: 50, WPM: 40}) {
 		t.Error("no_hits_30: a words run must not count")
 	}
 }
@@ -261,5 +261,21 @@ func TestWeeklyProgressAndCompletion(t *testing.T) {
 	minutes := weeklyPool[4]
 	if minutes.Progress(Week{Seconds: 29*60 + 59}) != 29 || !minutes.Completed(Week{Seconds: 30 * 60}) {
 		t.Error("week_minutes_30: wrong progress or completion")
+	}
+}
+
+// A time run started with one keystroke and then left alone scores full
+// accuracy with no hits. It must not count toward anything.
+func TestIdleRunCountsTowardNothing(t *testing.T) {
+	idle := Run{Mode: "time", Target: 120, Punctuation: true, Quotes: true, WPM: 0.5, Accuracy: 100}
+	for _, r := range shapes(idle) {
+		for _, c := range all {
+			if c.Completed(r) {
+				t.Errorf("%s: completed by an idle run %+v", c.ID, r)
+			}
+		}
+	}
+	if Counts(Run{WPM: MinWPM - 0.1}) || !Counts(Run{WPM: MinWPM}) {
+		t.Errorf("expected runs to count from %d WPM", MinWPM)
 	}
 }

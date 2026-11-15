@@ -156,7 +156,9 @@ apply to.
   words.
 - **Weekly**: one goal reached over several runs from Monday to Sunday, such as 10 exercises, 1,000
   words or 4 different days of practice. The menu shows your progress, for example `4/10`. Progress comes
-  from your run history, and runs that ended in a knockout don't count.
+  from your run history.
+
+A run counts toward neither challenge if it ended in a knockout or was slower than 10 WPM.
 
 ### Battle strip
 

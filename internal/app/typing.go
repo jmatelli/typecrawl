@@ -127,8 +127,12 @@ type typingModel struct {
 	lastKeystroke  time.Time    // when the last rune/space was processed, for the streak's pause check
 	charMistakes   map[rune]int // this run's per-character mistake counts, for weak-key tracking
 	// specialLanded counts the special words landed clean this run, for
-	// the daily challenges that ask for them.
-	specialLanded specialWords
+	// the daily challenges that ask for them. specialLandedAt holds the
+	// word positions already counted: backspacing across a streak
+	// milestone and retyping it marks the same position special again,
+	// and that must not count twice.
+	specialLanded   specialWords
+	specialLandedAt map[int]bool
 
 	pasteAttempts int // pasted input events rejected this run -- see the tea.KeyRunes case
 
@@ -489,7 +493,7 @@ func (m *typingModel) completeWord() {
 	if m.wordIndex == m.goldenWordIdx {
 		if !m.wordHasMistake {
 			m.shieldActive = true
-			m.specialLanded.golden++
+			m.countSpecialLanded(&m.specialLanded.golden)
 			m.lastDrop, m.lastDropStyle = goldenWordMarker+" shield!", goldenWordStyle
 		}
 		m.goldenWordIdx = -1
@@ -497,7 +501,7 @@ func (m *typingModel) completeWord() {
 	if m.wordIndex == m.greenWordIdx {
 		if !m.wordHasMistake {
 			m.hp = min(m.hp+game.GreenWordHealAmount, m.maxHP)
-			m.specialLanded.green++
+			m.countSpecialLanded(&m.specialLanded.green)
 			m.lastDrop, m.lastDropStyle = greenWordMarker+" heal!", greenWordStyle
 		}
 		m.greenWordIdx = -1
@@ -505,7 +509,7 @@ func (m *typingModel) completeWord() {
 	if m.wordIndex == m.blueWordIdx {
 		if !m.wordHasMistake {
 			m.shieldUntil = time.Now().Add(game.BlueWordShieldDuration)
-			m.specialLanded.blue++
+			m.countSpecialLanded(&m.specialLanded.blue)
 			m.lastDrop, m.lastDropStyle = fmt.Sprintf("%s %.0fs shield!", blueWordMarker, game.BlueWordShieldDuration.Seconds()), blueWordStyle
 		}
 		m.blueWordIdx = -1
@@ -561,6 +565,19 @@ func (m *typingModel) completeWord() {
 // streak/combo bookkeeping, and any page flip it triggered -- so retyping
 // it plays out exactly as if it had never been completed. It can cascade
 // back multiple words if backspace keeps being pressed.
+// countSpecialLanded adds one to counter for the special word just
+// landed, unless a special word at this position was already counted.
+func (m *typingModel) countSpecialLanded(counter *int) {
+	if m.specialLandedAt[m.wordIndex] {
+		return
+	}
+	if m.specialLandedAt == nil {
+		m.specialLandedAt = make(map[int]bool)
+	}
+	m.specialLandedAt[m.wordIndex] = true
+	*counter++
+}
+
 func (m *typingModel) backspaceIntoPreviousWord() {
 	if len(m.commits) == 0 || m.wordIndex == 0 {
 		return
