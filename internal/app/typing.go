@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/jmatelli/typecrawl/internal/avatar"
 	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/quotes"
 	"github.com/jmatelli/typecrawl/internal/stats"
@@ -145,6 +147,26 @@ type typingModel struct {
 	blueWordIdx int
 	shieldUntil time.Time
 	anyMistake  bool // whether any wrong keystroke happened this run, even if fixed or shielded
+
+	// The battle strip (see battle.go). battle is the profile's setting;
+	// the strip is also hidden when the terminal is too small. The times
+	// below are when the last letter was cut, the last hit landed and the
+	// last monster fell, which the strip animates from.
+	battle              bool
+	avatar              avatar.Avatar
+	height              int
+	lastCutAt           time.Time
+	lastHitAt           time.Time
+	lastHitStrength     int
+	lastHitBlockedBy    string // the marker of the shield that absorbed the last hit, "" if none did
+	lastHitBlockedStyle lipgloss.Style
+	lastKillAt          time.Time
+	lastDrop            string
+	lastDropStyle       lipgloss.Style
+	// pendingFinish delivers the result during the pause after a
+	// knockout (see finish). It returns nil once the result has been
+	// delivered, so it can't be recorded twice.
+	pendingFinish tea.Cmd
 }
 
 func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation, zenMode, focusWeak, quotesMode bool, quotePool []quotes.Quote, weakChars map[rune]int, ghostPaceMS []int, ghostWPMSeries []float64) typingModel {
@@ -238,6 +260,7 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 
 	case tickMsg:
@@ -254,6 +277,12 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if m.finished {
+			// Only reachable during the pause on a knockout, before the
+			// results take over. Quitting there must still record the
+			// knockout, so the result goes first.
+			if msg.Type == tea.KeyCtrlC {
+				return m, tea.Sequence(m.pendingFinish, tea.Quit)
+			}
 			return m, nil
 		}
 		switch msg.Type {
@@ -299,7 +328,12 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tracker.Start = time.Now()
 			}
 			for _, r := range msg.Runes {
-				if !m.typeRune(r) {
+				cutBefore := m.lettersCut()
+				if m.typeRune(r) {
+					if m.lettersCut() > cutBefore {
+						m.lastCutAt = time.Now()
+					}
+				} else {
 					m.anyMistake = true
 					if m.blueWordIdx != -1 {
 						// The run just stopped being flawless, so a pending
@@ -312,9 +346,11 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// mistake until it runs out, without being spent.
 						// Checked before the golden shield so that one is
 						// saved for after the timer expires.
+						m.noteHit(1, blueWordMarker, blueWordStyle)
 						continue
 					}
 					if m.shieldActive {
+						m.noteHit(1, goldenWordMarker, goldenWordStyle)
 						// A landed golden word's shield fully absorbs the
 						// very next mistake: no HP loss, no streak break.
 						// The keystroke is still wrong in the buffer and
@@ -324,6 +360,7 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.shieldActive = false
 					} else {
 						m.registerMistake()
+						m.noteHit(m.comboCount, "", lipgloss.Style{})
 						if m.hp <= 0 {
 							m.ko = true
 							break
@@ -359,6 +396,27 @@ func (m *typingModel) typeRune(r rune) bool {
 	m.tracker.RecordChar(correct, m.wordIndex)
 	m.current += string(r)
 	return correct
+}
+
+// lettersCut is how many letters of the current word the battle strip's
+// avatar has cut away.
+func (m typingModel) lettersCut() int {
+	if m.wordIndex >= len(m.wordList) {
+		return 0
+	}
+	return correctPrefix(m.wordList[m.wordIndex], m.current)
+}
+
+// noteHit records a hit for the battle strip: the monster attacks, harder
+// in a combo, and either the avatar takes it or the shield marked
+// blockedBy does.
+func (m *typingModel) noteHit(strength int, blockedBy string, blockedStyle lipgloss.Style) {
+	if m.zenMode {
+		return // no HP loss in zen mode, so nothing hits back
+	}
+	m.lastHitAt = time.Now()
+	m.lastHitStrength = min(strength, 2)
+	m.lastHitBlockedBy, m.lastHitBlockedStyle = blockedBy, blockedStyle
 }
 
 // timedShieldActive reports whether a blue word's timed shield is still
@@ -417,21 +475,28 @@ func (m *typingModel) completeWord() {
 	// across a word boundary already treats HP damage as a permanent sunk
 	// cost rather than something to undo, neither effect is reverted if
 	// the player later backspaces back into this word.
+	// The monster falls either way; a special one drops its reward only
+	// if it was landed clean.
+	m.lastKillAt = time.Now()
+	m.lastDrop, m.lastDropStyle = "poof!", dropStyle
 	if m.wordIndex == m.goldenWordIdx {
 		if !m.wordHasMistake {
 			m.shieldActive = true
+			m.lastDrop, m.lastDropStyle = goldenWordMarker+" shield!", goldenWordStyle
 		}
 		m.goldenWordIdx = -1
 	}
 	if m.wordIndex == m.greenWordIdx {
 		if !m.wordHasMistake {
 			m.hp = min(m.hp+game.GreenWordHealAmount, m.maxHP)
+			m.lastDrop, m.lastDropStyle = greenWordMarker+" heal!", greenWordStyle
 		}
 		m.greenWordIdx = -1
 	}
 	if m.wordIndex == m.blueWordIdx {
 		if !m.wordHasMistake {
 			m.shieldUntil = time.Now().Add(game.BlueWordShieldDuration)
+			m.lastDrop, m.lastDropStyle = fmt.Sprintf("%s %.0fs shield!", blueWordMarker, game.BlueWordShieldDuration.Seconds()), blueWordStyle
 		}
 		m.blueWordIdx = -1
 	}
@@ -502,6 +567,7 @@ func (m *typingModel) backspaceIntoPreviousWord() {
 	m.bestCombo = last.bestCombo
 	m.xpBonus = last.xpBonus
 	m.pageStart = last.pageStart
+	m.lastKillAt = time.Time{} // the monster is back, so its drop goes
 }
 
 // ensureWords keeps a healthy lookahead buffer of generated words so the
@@ -548,16 +614,29 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 	quotesMode := m.quotesMode
 	wordsTyped := len(m.typedWords)
 	ghostWPMSeries := m.ghostWPMSeries
-	return m, func() tea.Msg {
-		return finishTypingMsg{
-			result: result, hp: hp, maxHP: maxHP, ko: ko,
-			xpBonus: xpBonus, bestCombo: bestCombo,
-			mode: mode, target: target, charMistakes: charMistakes,
-			hitCount:    hitCount,
-			punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, wordsTyped: wordsTyped,
-			ghostWPMSeries: ghostWPMSeries,
-		}
+	msg := finishTypingMsg{
+		result: result, hp: hp, maxHP: maxHP, ko: ko,
+		xpBonus: xpBonus, bestCombo: bestCombo,
+		mode: mode, target: target, charMistakes: charMistakes,
+		hitCount:    hitCount,
+		punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, wordsTyped: wordsTyped,
+		ghostWPMSeries: ghostWPMSeries,
 	}
+	if ko && m.battleVisible() {
+		// Leave the knocked-out avatar on screen for a moment. The result
+		// was already taken above, so the pause isn't counted as typing
+		// time.
+		delivered := new(atomic.Bool)
+		m.pendingFinish = func() tea.Msg {
+			if delivered.Swap(true) {
+				return nil
+			}
+			return msg
+		}
+		deliver := m.pendingFinish
+		return m, tea.Tick(koPause, func(time.Time) tea.Msg { return deliver() })
+	}
+	return m, func() tea.Msg { return msg }
 }
 
 // wrapWords greedily packs list[start:] into up to maxLines lines of at
@@ -685,7 +764,11 @@ func (m typingModel) View() string {
 
 	help := helpStyle.Render("esc: back to menu   ctrl+c: quit")
 
-	return lipgloss.JoinVertical(lipgloss.Left, headerStyle.Render(header), hpLine, "", body.String(), "", help)
+	parts := []string{headerStyle.Render(header), hpLine, "", body.String(), ""}
+	if m.battleVisible() {
+		parts = append(parts, renderBattleStrip(m.battleFrame(time.Now())), "")
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, append(parts, help)...)
 }
 
 // renderHPBar draws a filled/empty block bar plus the numeric HP, colored

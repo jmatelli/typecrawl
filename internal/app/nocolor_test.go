@@ -86,6 +86,14 @@ func dumpViews() {
 	fmt.Println("=== typing")
 	fmt.Println(typing.View())
 
+	// The battle strip, mid-hit, with a shield up and a special monster.
+	battle := newBattleModel("alpha", "beta")
+	battle.goldenWordIdx = 0
+	battle.shieldUntil = time.Now().Add(time.Minute)
+	battle = typeString(battle, "ax")
+	fmt.Println("=== battle")
+	fmt.Println(battle.View())
+
 	result := stats.Result{WPM: 60, Accuracy: 97, Duration: 30 * time.Second, WPMSeries: []float64{50, 55, 60, 58}, BurstSeries: []float64{50, 70, 65, 40}, ErrorWords: []int{2}}
 	fmt.Println("=== results")
 	fmt.Println(newResultsModel(result, 100, resultsExtra{xpGained: 50, isNewPB: true, personalBest: 60, oldLevel: 1, newLevel: 2, levelsGained: 1, hp: 80, maxHP: 100, ghostWPMSeries: []float64{40, 50, 55, 57}}).View())
@@ -152,7 +160,7 @@ func TestNoColorRemovesEveryColourButKeepsTextAttributes(t *testing.T) {
 
 			// The typing view has to stay readable: typed text bold, a
 			// mistake in reverse video, upcoming words faint.
-			typing := out[strings.Index(out, "=== typing"):strings.Index(out, "=== results")]
+			typing := out[strings.Index(out, "=== typing"):strings.Index(out, "=== battle")]
 			tp := sgrParams(typing)
 			for name, code := range map[string]int{"bold": 1, "faint": 2, "underline": 4, "reverse": 7} {
 				if !hasParam(tp, code) {

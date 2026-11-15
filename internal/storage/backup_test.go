@@ -46,7 +46,7 @@ func seedFullProfile(t *testing.T, db *sql.DB) *Profile {
 	must(SetEquippedTitle(db, p.ID, "wpm_60"))
 	p.EquippedTitle = "wpm_60"
 
-	must(SaveSettings(db, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, Punctuation: true, Quotes: true}))
+	must(SaveSettings(db, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, Punctuation: true, Quotes: true, HideBattleStrip: true}))
 
 	day1 := time.Date(2026, 10, 1, 23, 15, 0, 0, backupZone)
 	day2 := time.Date(2026, 10, 2, 5, 40, 0, 0, backupZone)
@@ -539,5 +539,47 @@ func TestImportedProfileKeepsWorkingWithNewRuns(t *testing.T) {
 	}
 	if exact.Exercises != 2 {
 		t.Errorf("expected the 2 runs from 23:15:00 up to but not including 05:40:00, got %+v", exact)
+	}
+}
+
+// Backups written before the battle strip existed have no HideBattleStrip
+// field. Importing one must leave the strip on, its default.
+func TestImportProfileFromBeforeTheBattleStripShowsIt(t *testing.T) {
+	src := openFileDB(t)
+	p, err := CreateProfile(src, "Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveSettings(src, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, ZenMode: true}); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := ExportProfile(src, p.ID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf, err := json.Marshal(exported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(string(buf), `,"HideBattleStrip":false`, "", 1)
+	if old == string(buf) {
+		t.Fatalf("expected the export to carry HideBattleStrip, got %s", buf)
+	}
+
+	var b Backup
+	if err := json.Unmarshal([]byte(old), &b); err != nil {
+		t.Fatal(err)
+	}
+	dst := openFileDB(t)
+	imported, err := ImportProfile(dst, &b, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSettings(dst, imported.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.HideBattleStrip || !s.ZenMode {
+		t.Errorf("expected the other settings kept and the battle strip shown, got %+v", s)
 	}
 }

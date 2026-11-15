@@ -140,7 +140,7 @@ func TestResetProfileKeepsNameAndAllTimeRecordsButClearsProgress(t *testing.T) {
 
 func TestSettingsRoundTrip(t *testing.T) {
 	db, p := newTestDB(t)
-	s := Settings{Mode: "words", Duration: 60, WordCount: 100, Punctuation: true, ZenMode: true, FocusWeak: true, Quotes: true}
+	s := Settings{Mode: "words", Duration: 60, WordCount: 100, Punctuation: true, ZenMode: true, FocusWeak: true, Quotes: true, HideBattleStrip: true}
 	if err := SaveSettings(db, p.ID, s); err != nil {
 		t.Fatal(err)
 	}
@@ -1104,5 +1104,42 @@ func TestAddColumnIfMissingIsIdempotent(t *testing.T) {
 	}
 	if err := addColumnIfMissing(db, "t", "extra", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		t.Fatalf("second call (duplicate column) should be treated as success, got %v", err)
+	}
+}
+
+// A profile whose settings were saved before the battle strip existed
+// must see the strip after upgrading.
+func TestMigrateShowsTheBattleStripForExistingSettings(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`
+		CREATE TABLE profiles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+			level INTEGER NOT NULL DEFAULT 1, xp INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE settings (
+			profile_id INTEGER PRIMARY KEY, mode TEXT NOT NULL DEFAULT 'time',
+			duration INTEGER NOT NULL DEFAULT 30, word_count INTEGER NOT NULL DEFAULT 100,
+			punctuation INTEGER NOT NULL DEFAULT 0
+		);
+		INSERT INTO profiles (id, name) VALUES (1, 'Alice');
+		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation) VALUES (1, 'words', 60, 50, 1);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate on old schema failed: %v", err)
+	}
+	s, err := LoadSettings(db, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.HideBattleStrip || s.Mode != "words" || !s.Punctuation {
+		t.Errorf("expected the saved settings kept and the battle strip shown, got %+v", s)
 	}
 }

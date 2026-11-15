@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A battle strip below the words: the profile's avatar sword-fights the
+  current word, cutting a letter for each one typed correctly, while
+  mistakes make the monster hit back. Special words are distinct monsters
+  that drop their reward, active shields are drawn in front of the
+  avatar, and a knockout is shown for a moment before the results (the
+  pause isn't counted in the run's time). On by default; `b` in the menu
+  turns it off per profile, and it hides itself in terminals smaller than
+  70x16.
+
 - Special words carry a marker as well as a colour, so they can be told
   apart without relying on colour: `*` golden, `+` green, `~` blue. The
   marker stays on the word while it is being typed, and the shield
