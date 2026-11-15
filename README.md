@@ -108,7 +108,7 @@ typecrawl --profile Alice --words 200 --text ~/chapter-one.txt      # typed in o
 - **Rewards**: runs on your own text earn XP, and each file keeps its own personal bests and ghost.
   They don't count toward achievements, daily or weekly challenges, or the profile's exercise and
   knockout counts, because a list of very short words would make those trivial. They do count as
-  practice for the daily streak.
+  practice for the daily streak, but not toward the achievement for 10 exercises in a day.
 
 ### Weak keys and drills
 
@@ -122,7 +122,8 @@ quarter after 60, and a key you've fixed eventually drops out. Counts recorded b
 start fading from the upgrade.
 
 After a run where you missed any words, press `d` on the results screen to drill them. A drill is
-each missed word three times, shuffled, up to 30 words. A word counts as missed if you hit a wrong key
+each missed word three times (more when there are only a few, so a drill is at least 12 words),
+shuffled, for up to 30 different words. A word counts as missed if you hit a wrong key
 in it at any point, even one you then fixed, or if you sent it short. Drills earn XP but set no
 personal best and, as with your own text, count toward no achievement or challenge.
 

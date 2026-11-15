@@ -67,7 +67,13 @@ func (m keyboardViewModel) View() string {
 	for r, n := range m.weights {
 		top = append(top, charCount{r, n})
 	}
-	sort.Slice(top, func(i, j int) bool { return top[i].n > top[j].n })
+	// Ties in character order, so the order stays put between visits.
+	sort.Slice(top, func(i, j int) bool {
+		if top[i].n != top[j].n {
+			return top[i].n > top[j].n
+		}
+		return top[i].r < top[j].r
+	})
 	if len(top) > 8 {
 		top = top[:8]
 	}

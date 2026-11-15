@@ -212,12 +212,16 @@ func (m resultsModel) unverifiedView() string {
 // clipboard sequence gives no sign of it.
 func (m resultsModel) footer() string {
 	keys := "enter: restart   s: share   q: quit"
-	if n := len(m.extra.missedWords); n > 0 {
+	if n := min(len(m.extra.missedWords), drillMaxWords); n > 0 {
 		plural := "s"
 		if n == 1 {
 			plural = ""
 		}
-		keys = fmt.Sprintf("enter: restart   d: drill the %d word%s you missed   s: share   q: quit", n, plural)
+		what := fmt.Sprintf("the %d word%s you missed", n, plural)
+		if len(m.extra.missedWords) > n {
+			what = fmt.Sprintf("the first %d of the %d words you missed", n, len(m.extra.missedWords))
+		}
+		keys = "enter: restart   d: drill " + what + "   s: share   q: quit"
 	}
 	help := helpStyle.Render(keys)
 	if !m.shared {

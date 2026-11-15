@@ -64,11 +64,20 @@ func mapsEqual(a, b map[string]int) bool {
 }
 
 func TestBuildDrill(t *testing.T) {
-	for _, missed := range [][]string{{"one"}, {"a", "b"}, {"x", "y", "z", "w"}} {
+	for _, c := range []struct {
+		missed  []string
+		repeats int
+	}{
+		{[]string{"one"}, 12}, // repeated more to make the minimum length
+		{[]string{"a", "b"}, 6},
+		{[]string{"x", "y", "z", "w"}, 3},
+		{[]string{"p", "q", "r", "s", "t", "u"}, 3},
+	} {
+		missed := c.missed
 		for range 50 {
 			drill := buildDrill(missed)
-			if len(drill) != len(missed)*drillRepeats {
-				t.Fatalf("%q: expected %d words, got %q", missed, len(missed)*drillRepeats, drill)
+			if len(drill) != len(missed)*c.repeats {
+				t.Fatalf("%q: expected %d words, got %q", missed, len(missed)*c.repeats, drill)
 			}
 			counts := map[string]int{}
 			for i, w := range drill {
@@ -78,8 +87,8 @@ func TestBuildDrill(t *testing.T) {
 				}
 			}
 			for _, w := range missed {
-				if counts[w] != drillRepeats {
-					t.Fatalf("%q: expected %q %d times, got %q", missed, w, drillRepeats, drill)
+				if counts[w] != c.repeats {
+					t.Fatalf("%q: expected %q %d times, got %q", missed, w, c.repeats, drill)
 				}
 			}
 		}
@@ -90,6 +99,13 @@ func TestBuildDrill(t *testing.T) {
 	}
 	if got := buildDrill(many); len(got) != drillMaxWords*drillRepeats {
 		t.Fatalf("expected the drill capped at %d words, got %d", drillMaxWords*drillRepeats, len(got))
+	}
+	if got := buildDrill([]string{"a", "a", "b"}); len(got) != 12 {
+		t.Fatalf("expected a repeated input word counted once, got %q", got)
+	}
+	m := newResultsModel(stats.Result{}, 80, resultsExtra{missedWords: many})
+	if !containsSubstring(m.footer(), "d: drill the first 30 of the 50 words you missed") {
+		t.Fatalf("expected the footer to say only 30 are drilled, got %q", m.footer())
 	}
 }
 
@@ -124,11 +140,11 @@ func TestDrillFromTheResults(t *testing.T) {
 		t.Fatalf("expected the drill to start, got state %v", m.state)
 	}
 	drill := m.typing.wordList
-	if len(drill) != 6 || m.typing.mode != modeWords || m.typing.target != 6 || !m.typing.zenMode {
-		t.Fatalf("expected a 6-word zen drill, got %d words %q, target %d", len(drill), drill, m.typing.target)
+	if len(drill) != 12 || m.typing.mode != modeWords || m.typing.target != 12 || !m.typing.zenMode {
+		t.Fatalf("expected a 12-word zen drill, got %d words %q, target %d", len(drill), drill, m.typing.target)
 	}
-	if got := slices.Sorted(slices.Values(drill)); !slices.Equal(got, []string{"beta", "beta", "beta", "école", "école", "école"}) {
-		t.Fatalf("expected each missed word three times, got %q", drill)
+	if got := slices.Sorted(slices.Values(drill)); !slices.Equal(got, slices.Concat(slices.Repeat([]string{"beta"}, 6), slices.Repeat([]string{"école"}, 6))) {
+		t.Fatalf("expected each missed word six times, got %q", drill)
 	}
 
 	for i, w := range drill {
@@ -146,10 +162,10 @@ func TestDrillFromTheResults(t *testing.T) {
 		t.Fatal("expected a drill to unlock no achievement")
 	}
 	history, _ := storage.ListTestHistory(m.db, profile.ID, 1)
-	if len(history) != 1 || history[0].Source != "drill" || history[0].WordsTyped != 6 {
+	if len(history) != 1 || history[0].Source != "drill" || history[0].WordsTyped != 12 {
 		t.Fatalf("expected the drill in the history, got %+v", history)
 	}
-	if pb, _ := storage.GetPersonalBest(m.db, profile.ID, "words", 6, "drill"); pb != nil {
+	if pb, _ := storage.GetPersonalBest(m.db, profile.ID, "words", 12, "drill"); pb != nil {
 		t.Fatalf("expected no personal best from a drill, got %+v", pb)
 	}
 	if m.results.extra.isNewPB || m.results.extra.xpGained <= 0 {

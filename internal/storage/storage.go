@@ -178,7 +178,7 @@ func migrate(db *sql.DB) error {
 			pair       TEXT NOT NULL,
 			count      INTEGER NOT NULL DEFAULT 0,
 			weight     REAL NOT NULL DEFAULT 0,
-			updated_at INTEGER NOT NULL DEFAULT 0,
+			weight_at  INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (profile_id, pair)
 		);
 		CREATE TABLE IF NOT EXISTS custom_sources (
@@ -262,17 +262,17 @@ func migrate(db *sql.DB) error {
 // migrateFadingMistakes adds the fading weight to a char_mistakes table
 // from before mistakes faded. Each existing count becomes the starting
 // weight, as of now, so nothing a player has recorded is lost: it starts
-// fading from the upgrade. updated_at = 0 marks a row not yet migrated,
-// which no row written since can have, so running it again changes
-// nothing.
+// fading from the upgrade. weight_at, the Unix time the weight is as of,
+// is 0 for a row not yet migrated, which no row written since can have,
+// so running it again changes nothing.
 func migrateFadingMistakes(db *sql.DB, now time.Time) error {
 	if err := addColumnIfMissing(db, "char_mistakes", "weight", "REAL NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	if err := addColumnIfMissing(db, "char_mistakes", "updated_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+	if err := addColumnIfMissing(db, "char_mistakes", "weight_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	_, err := db.Exec(`UPDATE char_mistakes SET weight = count, updated_at = ? WHERE updated_at = 0`, now.Unix())
+	_, err := db.Exec(`UPDATE char_mistakes SET weight = count, weight_at = ? WHERE weight_at = 0`, now.Unix())
 	return err
 }
 
@@ -910,17 +910,21 @@ func RecordMistakes(db *sql.DB, profileID int64, chars map[rune]int, pairs map[s
 func addMistakes(tx *sql.Tx, table, column string, profileID int64, key string, n int, when time.Time) error {
 	var weight float64
 	var since int64
-	err := tx.QueryRow(fmt.Sprintf(`SELECT weight, updated_at FROM %s WHERE profile_id = ? AND %s = ?`, table, column), profileID, key).
+	err := tx.QueryRow(fmt.Sprintf(`SELECT weight, weight_at FROM %s WHERE profile_id = ? AND %s = ?`, table, column), profileID, key).
 		Scan(&weight, &since)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	weight = fade(weight, since, when) + float64(n)
+	// A clock set back mustn't move the weight's time back with it: once
+	// the clock was right again, the weight would read as years old and
+	// be gone.
+	at := max(since, when.Unix())
 	_, err = tx.Exec(fmt.Sprintf(`
-		INSERT INTO %[1]s (profile_id, %[2]s, count, weight, updated_at) VALUES (?, ?, ?, ?, ?)
+		INSERT INTO %[1]s (profile_id, %[2]s, count, weight, weight_at) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id, %[2]s) DO UPDATE SET
-			count = count + excluded.count, weight = excluded.weight, updated_at = excluded.updated_at
-	`, table, column), profileID, key, n, weight, when.Unix())
+			count = count + excluded.count, weight = excluded.weight, weight_at = excluded.weight_at
+	`, table, column), profileID, key, n, weight, at)
 	return err
 }
 
@@ -928,7 +932,7 @@ func addMistakes(tx *sql.Tx, table, column string, profileID int64, key string, 
 // now, rounded to whole mistakes. A key that has faded below half a
 // mistake is left out, so it stops counting as weak at all.
 func fadedWeights(db *sql.DB, table, column string, profileID int64, now time.Time) (map[string]int, error) {
-	rows, err := db.Query(fmt.Sprintf(`SELECT %s, weight, updated_at FROM %s WHERE profile_id = ?`, column, table), profileID)
+	rows, err := db.Query(fmt.Sprintf(`SELECT %s, weight, weight_at FROM %s WHERE profile_id = ?`, column, table), profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -1393,9 +1397,29 @@ func HasPracticedAllWeekdays(db *sql.DB, profileID int64) (bool, error) {
 }
 
 // HasDayWithAtLeast reports whether profileID completed at least n
-// exercises on any single day.
+// exercises on the built-in text on any single local day. It counts the
+// history rather than daily_activity, which also counts runs on a
+// player's own text and drills: those count as practice for the daily
+// streak, but a drill of three words is too quick to count toward a day
+// of exercises.
 func HasDayWithAtLeast(db *sql.DB, profileID int64, n int) (bool, error) {
-	return exists(db, `SELECT 1 FROM daily_activity WHERE profile_id = ? AND count >= ? LIMIT 1`, profileID, n)
+	rows, err := db.Query(`SELECT created_at FROM test_history WHERE profile_id = ? AND `+builtinSource, profileID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	perDay := map[string]int{}
+	for rows.Next() {
+		var t time.Time
+		if err := rows.Scan(&t); err != nil {
+			return false, err
+		}
+		day := t.Format("2006-01-02") // the day where the run was played, as RecordActivity keys it
+		if perDay[day]++; perDay[day] >= n {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // PerfectRunCount returns how many non-KO exercises profileID has finished

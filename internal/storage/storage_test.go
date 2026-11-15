@@ -848,17 +848,27 @@ func TestHasPracticedAllWeekdays(t *testing.T) {
 
 func TestHasDayWithAtLeast(t *testing.T) {
 	db, p := newTestDB(t)
-	now := time.Now()
-	for range 9 {
-		RecordActivity(db, p.ID, now)
+	y, mo, d := time.Now().Date()
+	noon := time.Date(y, mo, d, 12, 0, 0, 0, time.Local)
+	record := func(source string, at time.Time) {
+		t.Helper()
+		if err := RecordTestResult(db, p.ID, 50, 95, "time", 30, false, false, false, source, 20, 30*time.Second, at); err != nil {
+			t.Fatal(err)
+		}
 	}
-	got, _ := HasDayWithAtLeast(db, p.ID, 10)
-	if got {
+	for i := range 9 {
+		record("random", noon.Add(time.Duration(i)*time.Minute))
+	}
+	// Ten drills and a run the next day don't make it ten in a day.
+	for i := range 10 {
+		record("drill", noon.Add(time.Duration(i)*time.Second))
+	}
+	record("quotes", noon.AddDate(0, 0, 1))
+	if got, _ := HasDayWithAtLeast(db, p.ID, 10); got {
 		t.Fatal("expected false at 9 exercises in a day")
 	}
-	RecordActivity(db, p.ID, now)
-	got, _ = HasDayWithAtLeast(db, p.ID, 10)
-	if !got {
+	record("quotes", noon.Add(time.Hour))
+	if got, _ := HasDayWithAtLeast(db, p.ID, 10); !got {
 		t.Fatal("expected true at 10 exercises in a day")
 	}
 }

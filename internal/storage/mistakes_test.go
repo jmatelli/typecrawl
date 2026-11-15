@@ -173,3 +173,30 @@ func TestResetAndDeleteClearKeyPairs(t *testing.T) {
 		t.Fatalf("expected deleting the profile to clear its pairs, got %d, %v", n, err)
 	}
 }
+
+// A mistake recorded while the clock is set back keeps the weight's
+// later time, so the weight doesn't read as years old once it's fixed.
+func TestClockSetBackKeepsTheWeight(t *testing.T) {
+	db, p := newTestDB(t)
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	if err := RecordMistakes(db, p.ID, map[rune]int{'e': 10}, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordMistakes(db, p.ID, map[rune]int{'e': 1}, nil, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := WeakCharWeightsAt(db, p.ID, now); got['e'] != 11 {
+		t.Fatalf("expected the weight kept at 11, got %v", got)
+	}
+}
+
+// A drill in the history needs a version 3 backup, as custom sources do.
+func TestDrillRunNeedsBackupVersion3(t *testing.T) {
+	db, p := newTestDB(t)
+	if err := RecordTestResult(db, p.ID, 50, 99, "words", 6, false, false, false, "drill", 6, 10*time.Second, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := ExportProfile(db, p.ID, time.Now()); b.Version != 3 {
+		t.Fatalf("expected version 3, got %d", b.Version)
+	}
+}
