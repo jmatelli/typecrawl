@@ -62,6 +62,7 @@ type menuModel struct {
 	zenMode     bool
 	focusWeak   bool
 	quotes      bool // draws exercise text from cached quotes instead of random words
+	battle      bool // shows the battle strip below the words
 }
 
 // indexOf finds val in opts, defaulting to 0 if it's not there -- e.g. a
@@ -95,6 +96,7 @@ func newMenuModel(profile *storage.Profile, db *sql.DB) menuModel {
 		zenMode:     settings.ZenMode,
 		focusWeak:   settings.FocusWeak,
 		quotes:      settings.Quotes,
+		battle:      !settings.HideBattleStrip,
 	}
 	if settings.Mode == "words" {
 		m.mode = modeWords
@@ -113,6 +115,8 @@ func (m menuModel) saveSettings() {
 		ZenMode:     m.zenMode,
 		FocusWeak:   m.focusWeak,
 		Quotes:      m.quotes,
+
+		HideBattleStrip: !m.battle,
 	})
 }
 
@@ -187,6 +191,9 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// quotes mode is switched back off again.
 		m.quotes = !m.quotes
 		m.saveSettings()
+	case "b":
+		m.battle = !m.battle
+		m.saveSettings()
 	case "p":
 		return m, func() tea.Msg { return viewProfileMsg{} }
 	case "u":
@@ -248,7 +255,11 @@ func (m menuModel) View() string {
 	if m.quotes {
 		sourceStr = "Quotes"
 	}
-	sourceLine := fmt.Sprintf("Source: %s (s)", boldStyle.Render(sourceStr))
+	battleStr := "Off"
+	if m.battle {
+		battleStr = "On"
+	}
+	sourceLine := fmt.Sprintf("Source: %s (s)   Battle strip: %s (b)", boldStyle.Render(sourceStr), boldStyle.Render(battleStr))
 
 	punctStr, zenStr, focusStr := "Off", "Off", "Off"
 	if m.punctuation || m.quotes {

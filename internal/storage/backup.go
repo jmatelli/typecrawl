@@ -118,9 +118,9 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 	}
 
 	var s Settings
-	var punctuation, zenMode, focusWeak, quotes int
-	err = tx.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes FROM settings WHERE profile_id = ?`, id).
-		Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes)
+	var punctuation, zenMode, focusWeak, quotes, hideBattleStrip int
+	err = tx.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip FROM settings WHERE profile_id = ?`, id).
+		Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		s = defaultSettings()
@@ -128,6 +128,7 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 		return nil, err
 	default:
 		s.Punctuation, s.ZenMode, s.FocusWeak, s.Quotes = punctuation != 0, zenMode != 0, focusWeak != 0, quotes != 0
+		s.HideBattleStrip = hideBattleStrip != 0
 	}
 	b.Settings = &s
 
@@ -275,9 +276,9 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 
 	if s := b.Settings; s != nil {
 		_, err := tx.Exec(`
-			INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, s.Mode, s.Duration, s.WordCount, boolInt(s.Punctuation), boolInt(s.ZenMode), boolInt(s.FocusWeak), boolInt(s.Quotes))
+			INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, s.Mode, s.Duration, s.WordCount, boolInt(s.Punctuation), boolInt(s.ZenMode), boolInt(s.FocusWeak), boolInt(s.Quotes), boolInt(s.HideBattleStrip))
 		if err != nil {
 			return nil, err
 		}

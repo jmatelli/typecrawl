@@ -177,6 +177,9 @@ func migrate(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "settings", "quotes", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := addColumnIfMissing(db, "settings", "hide_battle_strip", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := addColumnIfMissing(db, "test_history", "punctuation", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -526,6 +529,10 @@ type Settings struct {
 	ZenMode     bool // disables HP loss/KO for a pure-practice experience
 	FocusWeak   bool // biases word choice toward the player's weakest characters
 	Quotes      bool // draws exercise text from cached quotes instead of random words
+	// HideBattleStrip turns off the animated fight below the words. It is
+	// stored as "hide" so that the zero value, which is what profiles and
+	// backups from before the strip existed read as, shows it.
+	HideBattleStrip bool
 }
 
 func defaultSettings() Settings {
@@ -535,11 +542,11 @@ func defaultSettings() Settings {
 // LoadSettings returns profileID's saved settings, or sensible defaults if
 // none have been saved yet.
 func LoadSettings(db *sql.DB, profileID int64) (Settings, error) {
-	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes FROM settings WHERE profile_id = ?`, profileID)
+	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip FROM settings WHERE profile_id = ?`, profileID)
 
 	var s Settings
-	var punctuation, zenMode, focusWeak, quotes int
-	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes)
+	var punctuation, zenMode, focusWeak, quotes, hideBattleStrip int
+	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultSettings(), nil
 	}
@@ -550,6 +557,7 @@ func LoadSettings(db *sql.DB, profileID int64) (Settings, error) {
 	s.ZenMode = zenMode != 0
 	s.FocusWeak = focusWeak != 0
 	s.Quotes = quotes != 0
+	s.HideBattleStrip = hideBattleStrip != 0
 	return s, nil
 }
 
@@ -563,8 +571,8 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 		return 0
 	}
 	_, err := db.Exec(`
-		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
 			mode        = excluded.mode,
 			duration    = excluded.duration,
@@ -572,8 +580,9 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 			punctuation = excluded.punctuation,
 			zen_mode    = excluded.zen_mode,
 			focus_weak  = excluded.focus_weak,
-			quotes      = excluded.quotes
-	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak), toInt(s.Quotes))
+			quotes      = excluded.quotes,
+			hide_battle_strip = excluded.hide_battle_strip
+	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak), toInt(s.Quotes), toInt(s.HideBattleStrip))
 	return err
 }
 

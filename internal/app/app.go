@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jmatelli/typecrawl/internal/avatar"
 	"github.com/jmatelli/typecrawl/internal/challenge"
 	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/quotes"
@@ -234,6 +235,12 @@ func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 		msg.mode, msg.target, m.width, game.MaxHP(m.profile.Level), m.profile.Level,
 		msg.punctuation, msg.zenMode, msg.focusWeak, msg.quotes, quotePool, weakChars, ghostPaceMS, ghostWPMSeries,
 	)
+	// The battle strip follows the profile's saved setting, so quick
+	// launches from the command line get it too.
+	settings, _ := storage.LoadSettings(m.db, m.profile.ID) // best-effort; the default shows the strip
+	m.typing.battle = !settings.HideBattleStrip
+	m.typing.avatar = avatar.New(m.profile.Name)
+	m.typing.height = m.height
 	m.state = stateTyping
 	return m, m.typing.Init()
 }

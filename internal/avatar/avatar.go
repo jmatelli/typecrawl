@@ -18,27 +18,49 @@ const (
 
 var palette = []string{"1", "2", "3", "4", "5", "6", "9", "10", "11", "12", "13", "14"}
 
-// Generate deterministically builds a small colored block avatar for seed:
-// the left half of a gridSize x gridSize grid is derived from a hash of
-// seed and mirrored onto the right half (identicon-style), colored with a
-// single hash-derived color.
-func Generate(seed string) string {
+// Size is the avatar's height in rows. It is twice as many columns wide,
+// since each cell is drawn two characters wide to look square.
+const Size = gridSize
+
+// Avatar is the pattern and colour generated from a seed.
+type Avatar struct {
+	cells [gridSize][gridSize]bool
+	color string
+}
+
+// New deterministically builds the avatar for seed: the left half of a
+// gridSize x gridSize grid is derived from a hash of seed and mirrored
+// onto the right half (identicon-style), with a single hash-derived color.
+func New(seed string) Avatar {
 	sum := sha256.Sum256([]byte(seed))
-	style := lipgloss.NewStyle().Foreground(theme.Color(palette[int(sum[0])%len(palette)]))
+	a := Avatar{color: palette[int(sum[0])%len(palette)]}
 
 	half := gridSize/2 + 1 // generated columns; the rest mirror these
-	var b strings.Builder
 	bit := 0
 	for y := range gridSize {
-		row := make([]bool, gridSize)
 		for x := range half {
 			byteIdx := (bit / 8) % len(sum)
 			bitIdx := uint(bit % 8)
 			on := sum[byteIdx]&(1<<bitIdx) != 0
-			row[x] = on
-			row[gridSize-1-x] = on
+			a.cells[y][x] = on
+			a.cells[y][gridSize-1-x] = on
 			bit++
 		}
+	}
+	return a
+}
+
+// Style is the avatar's own colour.
+func (a Avatar) Style() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.Color(a.color))
+}
+
+// Rows draws the avatar one row per string, filled cells in style. Every
+// row is Size*2 columns wide.
+func (a Avatar) Rows(style lipgloss.Style) []string {
+	rows := make([]string, gridSize)
+	for y, row := range a.cells {
+		var b strings.Builder
 		for _, on := range row {
 			if on {
 				b.WriteString(style.Render(cell))
@@ -46,9 +68,13 @@ func Generate(seed string) string {
 				b.WriteString("  ")
 			}
 		}
-		if y < gridSize-1 {
-			b.WriteString("\n")
-		}
+		rows[y] = b.String()
 	}
-	return b.String()
+	return rows
+}
+
+// Generate draws the avatar for seed in its own colour.
+func Generate(seed string) string {
+	a := New(seed)
+	return strings.Join(a.Rows(a.Style()), "\n")
 }
