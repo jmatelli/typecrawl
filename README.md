@@ -62,6 +62,23 @@ typecrawl --list-profiles
 typecrawl --profile Alice --export backup.json
 ```
 
+### Backup and restore
+
+`--export` writes everything a profile owns to a JSON file: level and XP, test history, personal bests
+and ghost runs, settings, the daily streak and activity heatmap, weak-key counts, and daily challenge
+claims. `--import` creates a new profile from that file, on the same machine or another one:
+
+```sh
+typecrawl --profile Alice --export backup.json
+typecrawl --import backup.json
+typecrawl --import backup.json --profile "Alice 2"   # import under a different name
+```
+
+Import never overwrites or merges into an existing profile: if the name is already taken, nothing is
+imported. Files exported by v0.3.0 or earlier can still be imported, but they lack settings, weak-key
+counts and daily challenge claims, and every run in them is imported as a random-words run, so progress
+toward the quotes-mode achievements is not restored.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -13,15 +14,6 @@ import (
 	"github.com/jmatelli/typecrawl/internal/app"
 	"github.com/jmatelli/typecrawl/internal/storage"
 )
-
-// exportData is the shape written by --export: a snapshot of one profile's
-// stats, readable as-is or fed to external tooling.
-type exportData struct {
-	ExportedAt    time.Time                  `json:"exported_at"`
-	Profile       storage.Profile            `json:"profile"`
-	History       []storage.TestHistoryEntry `json:"history"`
-	PersonalBests []storage.PersonalBest     `json:"personal_bests"`
-}
 
 func findProfileByName(profiles []*storage.Profile, name string) *storage.Profile {
 	for _, p := range profiles {
@@ -46,7 +38,8 @@ func main() {
 	focusWeakFlag := flag.Bool("focus-weak", false, "quick-launch: bias word choice toward your weakest keys (requires --time or --words)")
 	quotesFlag := flag.Bool("quotes", false, "quick-launch: use quotes instead of random words (implies punctuation; requires --time or --words)")
 	listProfilesFlag := flag.Bool("list-profiles", false, "list saved profiles and exit")
-	exportFlag := flag.String("export", "", "export a profile's stats to this JSON file path and exit (requires --profile)")
+	exportFlag := flag.String("export", "", "export a profile to this JSON file path and exit (requires --profile)")
+	importFlag := flag.String("import", "", "import a profile from a JSON file written by --export and exit (add --profile to import it under a different name)")
 	var showVersion bool
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&showVersion, "v", false, "print version and exit (shorthand)")
@@ -76,6 +69,10 @@ func main() {
 	}
 	if *exportFlag != "" && *profileFlag == "" {
 		fmt.Fprintln(os.Stderr, "error: --export requires --profile")
+		os.Exit(1)
+	}
+	if *importFlag != "" && (*exportFlag != "" || hasMode || *listProfilesFlag) {
+		fmt.Fprintln(os.Stderr, "error: --import cannot be combined with --export, --list-profiles, --time or --words")
 		os.Exit(1)
 	}
 
@@ -118,17 +115,11 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: no profile named %q (available: %s)\n", *profileFlag, strings.Join(names, ", "))
 			os.Exit(1)
 		}
-		history, err := storage.ListTestHistory(db, profile.ID, 1_000_000)
+		data, err := storage.ExportProfile(db, profile.ID, time.Now())
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "error loading history:", err)
+			fmt.Fprintln(os.Stderr, "error reading profile:", err)
 			os.Exit(1)
 		}
-		bests, err := storage.ListPersonalBests(db, profile.ID)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error loading personal bests:", err)
-			os.Exit(1)
-		}
-		data := exportData{ExportedAt: time.Now(), Profile: *profile, History: history, PersonalBests: bests}
 		buf, err := json.MarshalIndent(data, "", "  ")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error encoding export:", err)
@@ -138,7 +129,34 @@ func main() {
 			fmt.Fprintln(os.Stderr, "error writing export file:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("exported %d exercises and %d personal bests for %q to %s\n", len(history), len(bests), profile.Name, *exportFlag)
+		fmt.Printf("exported %d exercises and %d personal bests for %q to %s\n", len(data.History), len(data.PersonalBests), profile.Name, *exportFlag)
+		return
+	}
+
+	if *importFlag != "" {
+		buf, err := os.ReadFile(*importFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error reading import file:", err)
+			os.Exit(1)
+		}
+		var data storage.Backup
+		if err := json.Unmarshal(buf, &data); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s is not a valid export file: %v\n", *importFlag, err)
+			os.Exit(1)
+		}
+		profile, err := storage.ImportProfile(db, &data, *profileFlag)
+		if errors.Is(err, storage.ErrProfileExists) || errors.Is(err, storage.ErrInvalidName) {
+			fmt.Fprintf(os.Stderr, "error: %v; nothing was imported (use --profile NAME to import it under a different name)\n", err)
+			os.Exit(1)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v; nothing was imported\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("imported %q (level %d) with %d exercises and %d personal bests\n", profile.Name, profile.Level, len(data.History), len(data.PersonalBests))
+		if data.IsPartial() {
+			fmt.Println("note: this file was written by an older version, which did not export settings, weak-key counts, or daily challenge claims; those start empty. It also did not record which runs used quotes mode, so every run is imported as a random-words run.")
+		}
 		return
 	}
 

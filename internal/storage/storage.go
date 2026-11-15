@@ -873,15 +873,17 @@ type TestHistoryEntry struct {
 	KO          bool
 	Punctuation bool
 	ZenMode     bool
-	WordsTyped  int
-	Duration    time.Duration
-	CreatedAt   time.Time
+	// Source is "random" or "quotes" (see PersonalBest.Source).
+	Source     string
+	WordsTyped int
+	Duration   time.Duration
+	CreatedAt  time.Time
 }
 
 // ListTestHistory returns profileID's most recent exercises, newest first.
 func ListTestHistory(db *sql.DB, profileID int64, limit int) ([]TestHistoryEntry, error) {
 	rows, err := db.Query(`
-		SELECT wpm, accuracy, mode, target, ko, punctuation, zen_mode, words_typed, duration_seconds, created_at
+		SELECT wpm, accuracy, mode, target, ko, punctuation, zen_mode, source, words_typed, duration_seconds, created_at
 		FROM test_history WHERE profile_id = ? ORDER BY created_at DESC, id DESC LIMIT ?
 	`, profileID, limit)
 	if err != nil {
@@ -893,7 +895,7 @@ func ListTestHistory(db *sql.DB, profileID int64, limit int) ([]TestHistoryEntry
 	for rows.Next() {
 		var e TestHistoryEntry
 		var koInt, punctInt, zenInt, durationSeconds int
-		if err := rows.Scan(&e.WPM, &e.Accuracy, &e.Mode, &e.Target, &koInt, &punctInt, &zenInt, &e.WordsTyped, &durationSeconds, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.WPM, &e.Accuracy, &e.Mode, &e.Target, &koInt, &punctInt, &zenInt, &e.Source, &e.WordsTyped, &durationSeconds, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		e.KO = koInt != 0
