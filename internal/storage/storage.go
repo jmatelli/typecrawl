@@ -150,6 +150,12 @@ func migrate(db *sql.DB) error {
 			claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (profile_id, day)
 		);
+		CREATE TABLE IF NOT EXISTS weekly_challenge_claims (
+			profile_id INTEGER NOT NULL REFERENCES profiles(id),
+			week       TEXT NOT NULL,
+			claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (profile_id, week)
+		);
 		CREATE TABLE IF NOT EXISTS quotes_cache (
 			id     INTEGER PRIMARY KEY,
 			quote  TEXT NOT NULL,
@@ -434,7 +440,7 @@ func ListProfiles(db *sql.DB) ([]*Profile, error) {
 
 // DeleteProfile permanently removes a profile and everything tied to it.
 func DeleteProfile(db *sql.DB, id int64) error {
-	for _, table := range []string{"daily_activity", "settings", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims"} {
+	for _, table := range []string{"daily_activity", "settings", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims"} {
 		if _, err := db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE profile_id = ?`, table), id); err != nil {
 			return err
 		}
@@ -450,7 +456,7 @@ func ResetProfile(db *sql.DB, id int64) (*Profile, error) {
 	if _, err := db.Exec(`UPDATE profiles SET level = 1, xp = 0, equipped_title = '' WHERE id = ?`, id); err != nil {
 		return nil, err
 	}
-	for _, table := range []string{"daily_activity", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims"} {
+	for _, table := range []string{"daily_activity", "personal_bests", "char_mistakes", "test_history", "daily_challenge_claims", "weekly_challenge_claims"} {
 		if _, err := db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE profile_id = ?`, table), id); err != nil {
 			return nil, err
 		}
@@ -917,6 +923,48 @@ func HasClaimedDailyChallenge(db *sql.DB, profileID int64, day string) (bool, er
 func ClaimDailyChallenge(db *sql.DB, profileID int64, day string, when time.Time) error {
 	_, err := db.Exec(`INSERT OR IGNORE INTO daily_challenge_claims (profile_id, day, claimed_at) VALUES (?, ?, ?)`, profileID, day, dbTime(when))
 	return err
+}
+
+// HasClaimedWeeklyChallenge reports whether profileID already claimed the
+// weekly challenge bonus for week (challenge.WeekKey format).
+func HasClaimedWeeklyChallenge(db *sql.DB, profileID int64, week string) (bool, error) {
+	return exists(db, `SELECT 1 FROM weekly_challenge_claims WHERE profile_id = ? AND week = ?`, profileID, week)
+}
+
+// ClaimWeeklyChallenge records that profileID has claimed the weekly
+// challenge bonus for week. It reports whether this call made the claim,
+// so the bonus is paid only by the call that did.
+func ClaimWeeklyChallenge(db *sql.DB, profileID int64, week string, when time.Time) (bool, error) {
+	res, err := db.Exec(`INSERT OR IGNORE INTO weekly_challenge_claims (profile_id, week, claimed_at) VALUES (?, ?, ?)`, profileID, week, dbTime(when))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// WeekTotals is what profileID did in a period, counted over the runs it
+// finished without a knockout. It feeds the weekly challenge.
+type WeekTotals struct {
+	Runs, Words, AccurateRuns, QuotesRuns, Seconds, Days int
+}
+
+// WeekTotalsBetween adds up profileID's non-knockout runs in [from, to).
+// The bounds go to the driver as time.Time, for the reason Summary gives.
+// Days counts distinct calendar days as each run recorded them.
+func WeekTotalsBetween(db *sql.DB, profileID int64, from, to time.Time) (WeekTotals, error) {
+	var t WeekTotals
+	err := db.QueryRow(`
+		SELECT COUNT(*),
+		       COALESCE(SUM(words_typed), 0),
+		       COALESCE(SUM(accuracy >= 95), 0),
+		       COALESCE(SUM(source = 'quotes'), 0),
+		       COALESCE(SUM(duration_seconds), 0),
+		       COUNT(DISTINCT substr(CAST(created_at AS TEXT), 1, 10))
+		FROM test_history
+		WHERE profile_id = ? AND ko = 0 AND created_at >= ? AND created_at < ?
+	`, profileID, from, to).Scan(&t.Runs, &t.Words, &t.AccurateRuns, &t.QuotesRuns, &t.Seconds, &t.Days)
+	return t, err
 }
 
 // CachedQuote is one quote cached locally from the quotes API -- shared

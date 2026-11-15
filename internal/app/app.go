@@ -424,6 +424,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// The weekly challenge is judged on the run history, which now
+		// includes this run. Like the daily one, it's a flat bonus outside
+		// the streak multiplier, and a knockout can't claim it.
+		var weeklyBonusXP int
+		weekly, week, weeklyClaimed := weeklyStatus(m.db, m.profile.ID, now)
+		if !msg.ko && !weeklyClaimed && weekly.Completed(week) {
+			if ok, err := storage.ClaimWeeklyChallenge(m.db, m.profile.ID, challenge.WeekKey(now), now); err == nil && ok {
+				weeklyBonusXP = weekly.XPBonus
+			}
+		}
+
 		if !msg.ko {
 			// A knockout earns nothing -- getting overwhelmed by mistakes
 			// shouldn't still pay out.
@@ -431,8 +442,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			xpBonus = msg.xpBonus
 
 			preStreak := baseXP + xpBonus
-			totalXP := int(float64(preStreak)*game.DailyStreakMultiplier(streakDays)+0.5) + challengeBonusXP
-			streakBonusXP = totalXP - preStreak - challengeBonusXP
+			totalXP := int(float64(preStreak)*game.DailyStreakMultiplier(streakDays)+0.5) + challengeBonusXP + weeklyBonusXP
+			streakBonusXP = totalXP - preStreak - challengeBonusXP - weeklyBonusXP
 
 			newLevel, newXP, levelsGained = game.AddXP(oldLevel, m.profile.XP, totalXP)
 			m.profile.Level = newLevel
@@ -454,7 +465,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = storage.Save(m.db, m.profile) // best-effort; gameplay continues even if the write fails
 
 		m.results = newResultsModel(msg.result, m.width, resultsExtra{
-			xpGained:              baseXP + xpBonus + streakBonusXP + challengeBonusXP,
+			xpGained:              baseXP + xpBonus + streakBonusXP + challengeBonusXP + weeklyBonusXP,
 			xpBase:                baseXP,
 			xpBonus:               xpBonus,
 			streakDays:            streakDays,
@@ -475,12 +486,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			challengeCompleted:    challengeCompleted,
 			challengeBonusXP:      challengeBonusXP,
 			challengeDescription:  todayChallenge.Description,
+			weeklyBonusXP:         weeklyBonusXP,
+			weeklyDescription:     weekly.Description,
 			ghostWPMSeries:        msg.ghostWPMSeries,
 		})
 
 		run := newRunSummary(m.profile.Name, msg, now)
 		run.Level = newLevel
-		run.XPGained = baseXP + xpBonus + streakBonusXP + challengeBonusXP
+		run.XPGained = baseXP + xpBonus + streakBonusXP + challengeBonusXP + weeklyBonusXP
 		run.NewPersonalBest = isNewPB
 		m.runs = append(m.runs, sessionRun{summary: run})
 
@@ -622,4 +635,19 @@ func (m Model) SharedRuns() []RunSummary {
 		}
 	}
 	return out
+}
+
+// weeklyStatus returns the weekly challenge for now's week, profileID's
+// progress toward it from the week's run history, and whether its bonus
+// has been claimed. Errors read as no progress and not claimed; claiming
+// is still guarded by the claims table.
+func weeklyStatus(db *sql.DB, profileID int64, now time.Time) (challenge.Weekly, challenge.Week, bool) {
+	c := challenge.ThisWeek(now)
+	start, end := challenge.WeekBounds(now)
+	t, _ := storage.WeekTotalsBetween(db, profileID, start, end)
+	claimed, _ := storage.HasClaimedWeeklyChallenge(db, profileID, challenge.WeekKey(now))
+	return c, challenge.Week{
+		Runs: t.Runs, Words: t.Words, AccurateRuns: t.AccurateRuns,
+		QuotesRuns: t.QuotesRuns, Seconds: t.Seconds, Days: t.Days,
+	}, claimed
 }

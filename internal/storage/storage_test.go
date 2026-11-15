@@ -1172,3 +1172,77 @@ func TestMigrateShowsTheBattleStripForExistingSettings(t *testing.T) {
 		t.Errorf("expected the saved settings kept, the battle strip shown and the default layout, got %+v", s)
 	}
 }
+
+// --- Weekly challenge ---
+
+func TestWeekTotalsCountOnlyNonKORunsInRange(t *testing.T) {
+	db, p := newTestDB(t)
+	zone := time.FixedZone("test", 2*3600)
+	monday := time.Date(2026, 11, 16, 0, 0, 0, 0, zone)
+	next := monday.AddDate(0, 0, 7)
+	rec := func(when time.Time, acc float64, ko bool, source string, words int, d time.Duration) {
+		t.Helper()
+		if err := RecordTestResult(db, p.ID, 60, acc, "time", 30, ko, false, false, source, words, d, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec(monday, 96, false, "random", 30, 30*time.Second)                  // first instant: counted
+	rec(monday.Add(5*time.Hour), 90, false, "quotes", 20, 30*time.Second) // same day
+	rec(monday.AddDate(0, 0, 2), 99, false, "quotes", 40, 60*time.Second) // another day
+	rec(monday.AddDate(0, 0, 3), 99, true, "quotes", 50, 60*time.Second)  // KO: not counted
+	rec(monday.Add(-time.Second), 99, false, "random", 50, time.Minute)   // previous week
+	rec(next, 99, false, "random", 50, time.Minute)                       // next week
+
+	got, err := WeekTotalsBetween(db, p.ID, monday, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := WeekTotals{Runs: 3, Words: 90, AccurateRuns: 2, QuotesRuns: 2, Seconds: 120, Days: 2}
+	if got != want {
+		t.Fatalf("WeekTotalsBetween = %+v, want %+v", got, want)
+	}
+}
+
+func TestClaimWeeklyChallengeOnlyOnce(t *testing.T) {
+	db, p := newTestDB(t)
+	now := time.Now()
+	if claimed, _ := HasClaimedWeeklyChallenge(db, p.ID, "2026-W46"); claimed {
+		t.Fatal("expected nothing claimed yet")
+	}
+	first, err := ClaimWeeklyChallenge(db, p.ID, "2026-W46", now)
+	if err != nil || !first {
+		t.Fatalf("expected the first claim to succeed, got %v, %v", first, err)
+	}
+	second, err := ClaimWeeklyChallenge(db, p.ID, "2026-W46", now)
+	if err != nil || second {
+		t.Fatalf("expected the second claim to report no claim, got %v, %v", second, err)
+	}
+	if claimed, _ := HasClaimedWeeklyChallenge(db, p.ID, "2026-W46"); !claimed {
+		t.Fatal("expected the week claimed")
+	}
+	if other, _ := ClaimWeeklyChallenge(db, p.ID, "2026-W47", now); !other {
+		t.Fatal("expected a different week to be claimable")
+	}
+}
+
+func TestResetAndDeleteClearWeeklyClaims(t *testing.T) {
+	db, p := newTestDB(t)
+	if _, err := ClaimWeeklyChallenge(db, p.ID, "2026-W46", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResetProfile(db, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, _ := HasClaimedWeeklyChallenge(db, p.ID, "2026-W46"); claimed {
+		t.Fatal("expected reset to clear weekly claims")
+	}
+	if _, err := ClaimWeeklyChallenge(db, p.ID, "2026-W46", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteProfile(db, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, _ := HasClaimedWeeklyChallenge(db, p.ID, "2026-W46"); claimed {
+		t.Fatal("expected delete to clear weekly claims")
+	}
+}

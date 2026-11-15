@@ -38,6 +38,9 @@ type resultsExtra struct {
 	challengeBonusXP     int    // XP awarded for that (0 if not just completed)
 	challengeDescription string // today's challenge description, shown regardless of completion
 
+	weeklyBonusXP     int    // XP for completing this week's challenge with this run (0 if it didn't)
+	weeklyDescription string // this week's challenge description
+
 	// ghostWPMSeries is the personal best's WPM curve this run raced
 	// against, overlaid on the WPM-over-time graph. nil if there was none.
 	ghostWPMSeries []float64
@@ -112,6 +115,9 @@ func (m resultsModel) View() string {
 		if m.extra.challengeBonusXP > 0 {
 			parts = append(parts, streakStyle.Render(fmt.Sprintf("+%d daily challenge", m.extra.challengeBonusXP)))
 		}
+		if m.extra.weeklyBonusXP > 0 {
+			parts = append(parts, streakStyle.Render(fmt.Sprintf("+%d weekly challenge", m.extra.weeklyBonusXP)))
+		}
 		if len(parts) > 0 {
 			xpLine += " (" + strings.Join(parts, " + ") + ")"
 		}
@@ -135,6 +141,10 @@ func (m resultsModel) View() string {
 		} else {
 			challengeLine = dimStyle.Render("Today's challenge: " + m.extra.challengeDescription)
 		}
+	}
+	if m.extra.weeklyBonusXP > 0 {
+		challengeLine = lipgloss.JoinVertical(lipgloss.Left, challengeLine,
+			levelUpStyle.Render("Weekly challenge complete!")+" "+m.extra.weeklyDescription)
 	}
 
 	streakLine := fmt.Sprintf(

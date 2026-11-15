@@ -67,6 +67,9 @@ func seedFullProfile(t *testing.T, db *sql.DB) *Profile {
 
 	must(RecordCharMistakes(db, p.ID, map[rune]int{'e': 7, ';': 2, 'é': 1}))
 	must(ClaimDailyChallenge(db, p.ID, "2026-10-02", day2))
+	if _, err := ClaimWeeklyChallenge(db, p.ID, "2026-W40", day2); err != nil {
+		t.Fatal(err)
+	}
 	return p
 }
 
@@ -168,6 +171,10 @@ func TestExportImportRoundTripPreservesEverything(t *testing.T) {
 		"early hour":     func(db *sql.DB, id int64) (any, error) { return HasTestInHourRange(db, id, 5, 6) },
 		"midday hour":    func(db *sql.DB, id int64) (any, error) { return HasTestInHourRange(db, id, 10, 20) },
 		"claimed":        func(db *sql.DB, id int64) (any, error) { return HasClaimedDailyChallenge(db, id, "2026-10-02") },
+		"weekly claimed": func(db *sql.DB, id int64) (any, error) { return HasClaimedWeeklyChallenge(db, id, "2026-W40") },
+		"week totals": func(db *sql.DB, id int64) (any, error) {
+			return WeekTotalsBetween(db, id, asOf.AddDate(0, 0, -7), asOf.AddDate(0, 0, 1))
+		},
 		"wpm trend":      func(db *sql.DB, id int64) (any, error) { return RecentWPMHistory(db, id, 10) },
 		"history":        func(db *sql.DB, id int64) (any, error) { return ListTestHistory(db, id, 10) },
 		"accuracy trend": func(db *sql.DB, id int64) (any, error) { return RecentAccuracyHistory(db, id, 10) },
@@ -291,6 +298,12 @@ func TestImportProfileRejectsInvalidBackupsAndChangesNothing(t *testing.T) {
 		"empty mistake key":      func(b *Backup) { b.CharMistakes[""] = 1 },
 		"duplicate claim":        func(b *Backup) { b.ChallengeClaims = append(b.ChallengeClaims, b.ChallengeClaims[0]) },
 		"malformed claim day":    func(b *Backup) { b.ChallengeClaims[0].Day = "yesterday" },
+		"duplicate weekly claim": func(b *Backup) {
+			b.WeeklyChallengeClaims = append(b.WeeklyChallengeClaims, b.WeeklyChallengeClaims[0])
+		},
+		"malformed claim week":  func(b *Backup) { b.WeeklyChallengeClaims[0].Week = "2026-W54" },
+		"unpadded claim week":   func(b *Backup) { b.WeeklyChallengeClaims[0].Week = "2026-W4" },
+		"weekly claim w/o date": func(b *Backup) { b.WeeklyChallengeClaims[0].ClaimedAt = time.Time{} },
 	}
 	for name, corrupt := range cases {
 		b := throughJSON(t, valid)
