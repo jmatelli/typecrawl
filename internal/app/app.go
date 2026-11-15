@@ -421,6 +421,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var isNewPB bool
 		personalBest := beforeBestWPM
+		if ownText {
+			// The overall best above is on the built-in text only; a run on
+			// the player's own file is compared with that file's best.
+			personalBest = 0
+			if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeStr, msg.target, sourceStr); err == nil && pb != nil {
+				personalBest = pb.WPM
+			}
+		}
 		if !msg.ko {
 			var err error
 			isNewPB, err = storage.RecordPersonalBest(m.db, m.profile.ID, modeStr, msg.target, sourceStr, msg.result.WPM, msg.result.Accuracy, msg.result.WordEndOffsetsMS, msg.result.WPMSeries, now)

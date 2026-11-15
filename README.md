@@ -99,7 +99,8 @@ typecrawl --profile Alice --words 200 --text ~/chapter-one.txt      # typed in o
 - **Text**: typed in order from the start, as written, so punctuation is always on. A run longer than the
   text goes back to the beginning.
 - **Files**: UTF-8 text of up to 4 MB. Accented letters, other alphabets and wide characters such as
-  Japanese work. Curly quotes and dashes are turned into the keys you'd type, as in quotes mode.
+  Japanese show and type correctly. Words are split on spaces, though, so text written without them
+  becomes one long word. Curly quotes and dashes are turned into the keys you'd type, as in quotes mode.
 - **Saved**: a file you launch with is saved to the profile, and the menu's `s` key offers it from then
   on. The file is read again at the start of every run, so edits show up. If it has been moved, the menu
   says so; `x` forgets it.
@@ -158,8 +159,9 @@ A session with no finished run prints nothing.
 
 `--export` writes everything a profile owns to a JSON file: level and XP, test history, personal bests
 and ghost runs, settings, the daily streak and activity heatmap, weak-key counts, and daily and weekly
-challenge claims, and your saved word lists and texts. Those are saved by path, so the files
-themselves aren't in the backup. `--import` creates a new profile from that file, on the same machine or another one:
+challenge claims, and your saved word lists and texts. Those are saved by their full path, which
+names your home folder, so the files themselves aren't in the backup. A backup with your own files
+in it needs this version or later to import; older versions say it's a newer format. `--import` creates a new profile from that file, on the same machine or another one:
 
 ```sh
 typecrawl --profile Alice --export backup.json

@@ -109,6 +109,9 @@ type typingModel struct {
 	// one (see withCustomSource), and customWords its words as loaded.
 	custom      textsource.Source
 	customWords []string
+	// customWeights is words.Weights for a word list, kept so each top-up
+	// doesn't walk the whole list again.
+	customWeights []int
 
 	// ghostPaceMS is the personal best's per-word cumulative elapsed
 	// milliseconds for this exact mode/target, if one exists -- raced live
@@ -220,17 +223,19 @@ func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation,
 	return m
 }
 
-// withCustomSource switches the run to the player's own file: words, a
+// withCustomSource switches the run to the player's own file: loaded, a
 // word list's or a text's words as textsource.Load returned them. It
 // replaces the words the constructor generated. Like a quote, a text
 // carries its own punctuation, so it counts as a punctuation run and has
 // nothing for weak-key focus to bias.
-func (m typingModel) withCustomSource(src textsource.Source, words []string) typingModel {
-	m.custom, m.customWords = src, words
+func (m typingModel) withCustomSource(src textsource.Source, loaded []string) typingModel {
+	m.custom, m.customWords = src, loaded
 	m.quotesMode, m.quotePool = false, nil
 	if src.Kind == textsource.Text {
 		m.punctuation = true
 		m.focusWeak, m.weakChars = false, nil
+	} else {
+		m.customWeights = words.Weights(loaded, m.weakChars)
 	}
 	n := m.target
 	if m.mode == modeTime {
@@ -256,7 +261,7 @@ func (m typingModel) genWords(n int, tail ...string) []string {
 	case m.custom.Kind == textsource.Text:
 		return textsource.InOrder(m.customWords, len(tail), n)
 	case m.custom.Kind == textsource.WordList:
-		list = words.FromList(m.customWords, n, m.weakChars, tail...)
+		list = words.FromWeighted(m.customWords, m.customWeights, n, tail...)
 	case m.quotesMode:
 		return quotes.Words(m.quotePool, n)
 	default:

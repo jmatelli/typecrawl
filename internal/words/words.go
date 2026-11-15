@@ -148,17 +148,29 @@ func ForLevelWeak(n, level int, weakChars map[rune]int, tail ...string) []string
 // weakChars when it isn't empty, with the same no-repeat window. list
 // must not be empty.
 func FromList(list []string, n int, weakChars map[rune]int, tail ...string) []string {
-	// The weights are worked out once per call rather than once per word:
-	// a player's list can hold hundreds of thousands of words.
-	var cumulative []int
-	if len(weakChars) > 0 {
-		cumulative = make([]int, len(list))
-		total := 0
-		for i, w := range list {
-			total += 1 + wordWeakScore(w, weakChars)
-			cumulative[i] = total
-		}
+	return FromWeighted(list, Weights(list, weakChars), n, tail...)
+}
+
+// Weights is list's running total of word weights for FromWeighted: each
+// word weighs 1 plus its weak-character score. It's nil when weakChars is
+// empty, meaning every word is equally likely. Working it out once and
+// keeping it saves walking a player's list, which can hold hundreds of
+// thousands of words, every time a run needs more of them.
+func Weights(list []string, weakChars map[rune]int) []int {
+	if len(weakChars) == 0 {
+		return nil
 	}
+	cumulative := make([]int, len(list))
+	total := 0
+	for i, w := range list {
+		total += 1 + wordWeakScore(w, weakChars)
+		cumulative[i] = total
+	}
+	return cumulative
+}
+
+// FromWeighted is FromList with list's Weights already worked out.
+func FromWeighted(list []string, cumulative []int, n int, tail ...string) []string {
 	draw := func() string {
 		if cumulative == nil {
 			return list[rand.Intn(len(list))]
@@ -179,7 +191,7 @@ func FromList(list []string, n int, weakChars map[rune]int, tail ...string) []st
 	for range n {
 		w := pickNotRecent(list, recent, draw)
 		out = append(out, w)
-		recent = append(recent, w)
+		recent = append(recent, baseForm(w))
 		if len(recent) > noRepeatWindow {
 			recent = recent[1:]
 		}
@@ -188,20 +200,21 @@ func FromList(list []string, n int, weakChars map[rune]int, tail ...string) []st
 }
 
 // pickNotRecent draws from list until it gets a word outside recent's
-// tail. If a heavily weighted word keeps coming up, it falls back to the
+// tail (compared in baseForm, as recent is: a list's own capitalized
+// words, like German nouns, match themselves). If a heavily weighted word keeps coming up, it falls back to the
 // first such word after a random point, so it always terminates and never
 // repeats a word inside the window.
 func pickNotRecent(list, recent []string, draw func() string) string {
 	window := min(len(recent), len(list)-1)
 	excluded := recent[len(recent)-window:]
 	for range 30 {
-		if w := draw(); !slices.Contains(excluded, w) {
+		if w := draw(); !slices.Contains(excluded, baseForm(w)) {
 			return w
 		}
 	}
 	offset := rand.Intn(len(list))
 	for i := range list {
-		if w := list[(offset+i)%len(list)]; !slices.Contains(excluded, w) {
+		if w := list[(offset+i)%len(list)]; !slices.Contains(excluded, baseForm(w)) {
 			return w
 		}
 	}

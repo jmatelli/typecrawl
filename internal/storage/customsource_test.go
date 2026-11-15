@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"reflect"
 	"slices"
 	"testing"
@@ -198,5 +199,41 @@ func TestBackupKeepsCustomSources(t *testing.T) {
 	}
 	if pb, _ := GetPersonalBest(dst, imported.ID, "time", 15, frenchList); pb == nil {
 		t.Fatal("expected the custom personal best imported")
+	}
+}
+
+// A backup without custom sources stays at version 2, which older builds
+// read; one with any needs version 3, which they refuse by version.
+func TestBackupVersionDependsOnCustomSources(t *testing.T) {
+	db, p := newTestDB(t)
+	if err := RecordTestResult(db, p.ID, 50, 99, "time", 30, false, false, false, "quotes", 20, 30*time.Second, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := ExportProfile(db, p.ID, time.Now()); b.Version != 2 {
+		t.Fatalf("expected version 2 without custom sources, got %d", b.Version)
+	}
+
+	for name, add := range map[string]func(*sql.DB, int64) error{
+		"saved source": func(db *sql.DB, id int64) error { return SaveCustomSource(db, id, frenchList, time.Now()) },
+		"selected source": func(db *sql.DB, id int64) error {
+			s := defaultSettings()
+			s.CustomSource = frenchList
+			return SaveSettings(db, id, s)
+		},
+		"custom run": func(db *sql.DB, id int64) error {
+			return RecordTestResult(db, id, 50, 99, "time", 30, false, false, false, frenchList, 20, 30*time.Second, time.Now())
+		},
+	} {
+		db, p := newTestDB(t)
+		if err := add(db, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		b, err := ExportProfile(db, p.ID, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b.Version != 3 {
+			t.Errorf("%s: expected version 3, got %d", name, b.Version)
+		}
 	}
 }
