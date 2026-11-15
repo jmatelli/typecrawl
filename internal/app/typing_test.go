@@ -24,11 +24,12 @@ func newTestTypingModel(mode testMode, wordList []string, maxHP int) typingModel
 		tracker:    stats.NewTracker(),
 		hp:         maxHP,
 		maxHP:      maxHP,
-		// -1 means "none" for both -- the zero value (0) would otherwise
-		// silently mark word index 0 as both golden and green in every
-		// test that doesn't care about that mechanic.
+		// -1 means "none" for all three -- the zero value (0) would
+		// otherwise silently mark word index 0 as golden, green and blue
+		// in every test that doesn't care about that mechanic.
 		goldenWordIdx: -1,
 		greenWordIdx:  -1,
+		blueWordIdx:   -1,
 	}
 }
 
@@ -470,7 +471,8 @@ func greenWordTestWordList(n int) []string {
 func TestGreenWordAppearsTwoWordsAheadAndHealsOnCleanCompletion(t *testing.T) {
 	wordList := greenWordTestWordList(20)
 	m := newTestTypingModel(modeWords, wordList, 100)
-	m.hp = 50 // leave room to observe the heal
+	m.anyMistake = true // a run that already slipped gets green (heal), not blue
+	m.hp = 50           // leave room to observe the heal
 
 	for i := 0; i < game.GreenWordStreakInterval; i++ {
 		m = typeString(m, "w")
@@ -508,6 +510,7 @@ func TestGreenWordIsVisibleAsUpcomingBeforeBecomingCurrent(t *testing.T) {
 	// the current-word render case would always shadow it).
 	wordList := greenWordTestWordList(20)
 	m := newTestTypingModel(modeWords, wordList, 100)
+	m.anyMistake = true // a run that already slipped gets green (heal), not blue
 
 	for i := 0; i < game.GreenWordStreakInterval; i++ {
 		m = typeString(m, "w")
@@ -531,6 +534,7 @@ func TestGreenWordIsVisibleAsUpcomingBeforeBecomingCurrent(t *testing.T) {
 func TestGreenWordMissedGrantsNoHeal(t *testing.T) {
 	wordList := greenWordTestWordList(20)
 	m := newTestTypingModel(modeWords, wordList, 100)
+	m.anyMistake = true // a run that already slipped gets green (heal), not blue
 	m.hp = 50
 
 	for i := 0; i < game.GreenWordStreakInterval; i++ {
@@ -556,7 +560,8 @@ func TestGreenWordMissedGrantsNoHeal(t *testing.T) {
 func TestGreenWordHealCapsAtMaxHP(t *testing.T) {
 	wordList := greenWordTestWordList(20)
 	m := newTestTypingModel(modeWords, wordList, 100)
-	m.hp = 100 // already full
+	m.anyMistake = true // a run that already slipped gets green (heal), not blue
+	m.hp = 100          // already full
 
 	for i := 0; i < game.GreenWordStreakInterval; i++ {
 		m = typeString(m, "w")
@@ -576,6 +581,7 @@ func TestGreenWordCanRetriggerOnLaterStreakMilestones(t *testing.T) {
 	// multiple of the interval, not just the first time.
 	wordList := greenWordTestWordList(game.GreenWordStreakInterval*3 + 10)
 	m := newTestTypingModel(modeWords, wordList, 100)
+	m.anyMistake = true // a run that already slipped gets green (heal), not blue
 	m.hp = 10
 
 	typeClean := func(count int) {
@@ -622,6 +628,174 @@ func TestViewShowsShieldActiveIndicator(t *testing.T) {
 	m.shieldActive = true
 	if !containsSubstring(m.View(), "shield active") {
 		t.Fatal("expected a shield indicator once active")
+	}
+}
+
+// --- Blue word (timed shield, flawless-run variant of the green word) ---
+
+func TestFlawlessRunGetsBlueWordInsteadOfGreen(t *testing.T) {
+	wordList := greenWordTestWordList(20)
+	m := newTestTypingModel(modeWords, wordList, 100)
+
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.greenWordIdx != -1 {
+		t.Fatalf("expected no green word in a flawless run, got index %d", m.greenWordIdx)
+	}
+	wantIdx := game.GreenWordStreakInterval + 1
+	if m.blueWordIdx != wantIdx {
+		t.Fatalf("expected the blue word marked at index %d, got %d", wantIdx, m.blueWordIdx)
+	}
+	if !strings.Contains(m.View(), blueWordStyle.Render(wordList[m.blueWordIdx])) {
+		t.Fatal("expected the upcoming blue word rendered in blueWordStyle")
+	}
+}
+
+func TestFixedMistakeStillDisqualifiesBlueWord(t *testing.T) {
+	wordList := greenWordTestWordList(20)
+	m := newTestTypingModel(modeWords, wordList, 100)
+
+	// A typo that's corrected keeps the streak, but the run is no longer
+	// flawless.
+	m = typeString(m, "x")
+	m = pressBackspace(m)
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.blueWordIdx != -1 || m.greenWordIdx == -1 {
+		t.Fatalf("expected a green word after any mistake, got green=%d blue=%d", m.greenWordIdx, m.blueWordIdx)
+	}
+}
+
+func TestBlueWordGrantsTimedShieldThatForgivesEveryMistake(t *testing.T) {
+	wordList := greenWordTestWordList(20)
+	m := newTestTypingModel(modeWords, wordList, 100)
+
+	for i := 0; i < game.GreenWordStreakInterval+2; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	if m.blueWordIdx != -1 {
+		t.Fatal("expected the blue word opportunity consumed after landing it")
+	}
+	if !m.timedShieldActive() {
+		t.Fatal("expected a clean blue word to start the timed shield")
+	}
+	if !containsSubstring(m.View(), "shield ") {
+		t.Fatal("expected a timed shield indicator")
+	}
+
+	streak := m.successCombo
+	m = typeString(m, "xyz") // several mistakes, all forgiven
+	if m.hp != 100 || m.hitCount != 0 {
+		t.Fatalf("expected no damage under the timed shield, got hp=%d hits=%d", m.hp, m.hitCount)
+	}
+	if !m.timedShieldActive() {
+		t.Fatal("expected the timed shield not to be consumed by mistakes")
+	}
+	m = pressBackspace(m)
+	m = pressBackspace(m)
+	m = pressBackspace(m)
+	m = typeString(m, "w")
+	m = pressSpace(m)
+	if m.successCombo != streak+1 {
+		t.Fatalf("expected the streak to survive shielded mistakes, got %d want %d", m.successCombo, streak+1)
+	}
+}
+
+func TestTimedShieldDoesNotCountUncorrectedWordsAsClean(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"cat", "dog"}, 100)
+	m.shieldUntil = time.Now().Add(time.Minute)
+	m.successCombo = 5
+	m = typeString(m, "xyz") // garbage, all forgiven HP-wise
+	m = pressSpace(m)
+	if m.hp != 100 {
+		t.Fatalf("expected no damage under the timed shield, got hp=%d", m.hp)
+	}
+	if m.successCombo != 0 {
+		t.Fatalf("expected an uncorrected shielded word to break the streak, got %d", m.successCombo)
+	}
+}
+
+func TestGoldenAbsorbedMistakeDisqualifiesBlueWord(t *testing.T) {
+	m := newTestTypingModel(modeWords, greenWordTestWordList(20), 100)
+	m.shieldActive = true
+	m = typeString(m, "x")
+	m = pressBackspace(m)
+	if !m.anyMistake {
+		t.Fatal("expected a shield-absorbed mistake to still count as a mistake for the blue word")
+	}
+}
+
+func TestMistakeBeforeBlueWordTurnsItGreen(t *testing.T) {
+	wordList := greenWordTestWordList(20)
+	m := newTestTypingModel(modeWords, wordList, 100)
+
+	for i := 0; i < game.GreenWordStreakInterval; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	blueIdx := m.blueWordIdx
+	if blueIdx == -1 {
+		t.Fatal("expected a pending blue word after a flawless streak")
+	}
+
+	// Slip on the intervening word, then fix it.
+	m = typeString(m, "x")
+	m = pressBackspace(m)
+	if m.blueWordIdx != -1 || m.greenWordIdx != blueIdx {
+		t.Fatalf("expected the pending blue word to revert to green at %d, got green=%d blue=%d", blueIdx, m.greenWordIdx, m.blueWordIdx)
+	}
+	if !strings.Contains(m.View(), greenWordStyle.Render(wordList[blueIdx])) {
+		t.Fatal("expected the reverted word rendered green")
+	}
+
+	m = typeString(m, "w")
+	m = pressSpace(m)
+	m = typeString(m, "w") // land the (now green) word
+	m = pressSpace(m)
+	if m.timedShieldActive() {
+		t.Fatal("expected no timed shield once the run had a mistake before the word")
+	}
+}
+
+func TestBlueWordMissedGrantsNoShield(t *testing.T) {
+	wordList := greenWordTestWordList(20)
+	m := newTestTypingModel(modeWords, wordList, 100)
+
+	for i := 0; i < game.GreenWordStreakInterval+1; i++ {
+		m = typeString(m, "w")
+		m = pressSpace(m)
+	}
+	m = typeString(m, "Z") // miss the blue word
+	m = pressSpace(m)
+	if m.timedShieldActive() {
+		t.Fatal("expected a missed blue word to grant no shield")
+	}
+	if m.blueWordIdx != -1 {
+		t.Fatal("expected the blue word opportunity consumed even when missed")
+	}
+}
+
+func TestExpiredTimedShieldNoLongerForgives(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"aaaa"}, 100)
+	m.shieldUntil = time.Now().Add(-time.Millisecond)
+	m = typeString(m, "x")
+	if m.hp >= 100 {
+		t.Fatalf("expected normal damage once the timed shield expired, got hp=%d", m.hp)
+	}
+}
+
+func TestTimedShieldPreservesGoldenShield(t *testing.T) {
+	m := newTestTypingModel(modeWords, []string{"aaaa"}, 100)
+	m.shieldActive = true
+	m.shieldUntil = time.Now().Add(time.Minute)
+	m = typeString(m, "x")
+	if !m.shieldActive {
+		t.Fatal("expected the golden shield kept while the timed shield absorbs the mistake")
 	}
 }
 

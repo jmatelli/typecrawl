@@ -141,6 +141,12 @@ const (
 	// -- deliberately level-independent (unlike MaxHP), so it's a
 	// meaningful save early on and a smaller but still real top-up later.
 	GreenWordHealAmount = 25
+	// BlueWordShieldDuration is how long the timed shield from a "blue
+	// word" lasts. A blue word replaces the green word when it shows up
+	// in a run that hasn't had a single mistake yet -- a heal would be
+	// worthless at full HP, so a flawless run is rewarded with a window
+	// where every mistake is forgiven instead.
+	BlueWordShieldDuration = 5 * time.Second
 )
 
 // IsSuspiciousRun reports whether result looks more like scripted or

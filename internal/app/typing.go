@@ -28,9 +28,11 @@ var (
 	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	// goldenWordStyle marks a rare word that grants a mistake-forgiving
 	// shield if typed clean. greenWordStyle marks a streak-earned word
-	// that heals if typed clean.
+	// that heals if typed clean. blueWordStyle marks the green word's
+	// flawless-run variant, which grants a timed shield instead.
 	goldenWordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 	greenWordStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+	blueWordStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 	hpHighStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	hpMidStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	hpLowStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
@@ -119,6 +121,15 @@ type typingModel struct {
 	goldenWordIdx int
 	greenWordIdx  int
 	shieldActive  bool
+
+	// blueWordIdx replaces greenWordIdx when the streak milestone is hit
+	// in a run with no mistake at all so far (anyMistake false): landing
+	// it clean sets shieldUntil, and every mistake before that deadline is
+	// forgiven the same way the golden shield forgives one. -1 means none
+	// pending.
+	blueWordIdx int
+	shieldUntil time.Time
+	anyMistake  bool // whether any wrong keystroke happened this run, even if fixed or shielded
 }
 
 func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation, zenMode, focusWeak, quotesMode bool, quotePool []quotes.Quote, weakChars map[rune]int, ghostPaceMS []int, ghostWPMSeries []float64) typingModel {
@@ -151,6 +162,7 @@ func newTypingModel(mode testMode, target, width, maxHP, level int, punctuation,
 		hp:             maxHP,
 		maxHP:          maxHP,
 		greenWordIdx:   -1,
+		blueWordIdx:    -1,
 	}
 	m.wordList = m.genWords(n)
 	m.goldenWordIdx = rollGoldenWordIndex(len(m.wordList))
@@ -273,6 +285,20 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			for _, r := range msg.Runes {
 				if !m.typeRune(r) {
+					m.anyMistake = true
+					if m.blueWordIdx != -1 {
+						// The run just stopped being flawless, so a pending
+						// blue word reverts to the regular green heal.
+						m.greenWordIdx = m.blueWordIdx
+						m.blueWordIdx = -1
+					}
+					if m.timedShieldActive() {
+						// A landed blue word's timed shield forgives every
+						// mistake until it runs out, without being spent.
+						// Checked before the golden shield so that one is
+						// saved for after the timer expires.
+						continue
+					}
 					if m.shieldActive {
 						// A landed golden word's shield fully absorbs the
 						// very next mistake: no HP loss, no streak break.
@@ -320,6 +346,12 @@ func (m *typingModel) typeRune(r rune) bool {
 	return correct
 }
 
+// timedShieldActive reports whether a blue word's timed shield is still
+// running.
+func (m typingModel) timedShieldActive() bool {
+	return time.Now().Before(m.shieldUntil)
+}
+
 // checkPause breaks the mistake-free streak on its own if too long has
 // passed since the last keystroke -- hesitating resets the streak just
 // like a mistake does, independent of accuracy.
@@ -356,6 +388,14 @@ func (m *typingModel) completeWord() {
 		return
 	}
 
+	// The timed shield forgives a typo's HP/combo penalty, not the typo:
+	// submitting a word that still has shielded typos in it doesn't count
+	// as clean, so the shield window can't be used to mash through words
+	// while farming streak XP. Correcting them before space still does.
+	if m.timedShieldActive() && m.current != m.wordList[m.wordIndex] {
+		m.wordHasMistake = true
+	}
+
 	// Resolve this exercise's special words, if the one just finished was
 	// one of them. Both are one-shot: landed clean or not, the
 	// opportunity is spent either way. Consistent with how backspacing
@@ -373,6 +413,12 @@ func (m *typingModel) completeWord() {
 			m.hp = min(m.hp+game.GreenWordHealAmount, m.maxHP)
 		}
 		m.greenWordIdx = -1
+	}
+	if m.wordIndex == m.blueWordIdx {
+		if !m.wordHasMistake {
+			m.shieldUntil = time.Now().Add(game.BlueWordShieldDuration)
+		}
+		m.blueWordIdx = -1
 	}
 
 	m.commits = append(m.commits, wordCommit{
@@ -402,7 +448,14 @@ func (m *typingModel) completeWord() {
 			// current-word case is checked first). Marking the word
 			// *after* next instead gives it one real word's worth of
 			// lead time to be seen coming, same as a golden word.
-			m.greenWordIdx = m.wordIndex + 2
+			//
+			// A flawless run so far is at full HP, where a heal would be
+			// wasted, so it gets a blue (timed shield) word instead.
+			if m.anyMistake {
+				m.greenWordIdx = m.wordIndex + 2
+			} else {
+				m.blueWordIdx = m.wordIndex + 2
+			}
 		}
 	}
 	m.wordHasMistake = false
@@ -565,6 +618,9 @@ func (m typingModel) View() string {
 	if m.shieldActive {
 		hpLine += "  " + goldenWordStyle.Render("shield active")
 	}
+	if remaining := time.Until(m.shieldUntil); remaining > 0 {
+		hpLine += "  " + blueWordStyle.Render(fmt.Sprintf("shield %.1fs", remaining.Seconds()))
+	}
 
 	lines, _ := wrapWords(m.wordList, m.pageStart, m.pageWidth(), visibleLines)
 	var body strings.Builder
@@ -579,6 +635,8 @@ func (m typingModel) View() string {
 				body.WriteString(goldenWordStyle.Render(m.wordList[idx]))
 			case idx == m.greenWordIdx:
 				body.WriteString(greenWordStyle.Render(m.wordList[idx]))
+			case idx == m.blueWordIdx:
+				body.WriteString(blueWordStyle.Render(m.wordList[idx]))
 			default:
 				body.WriteString(dimStyle.Render(m.wordList[idx]))
 			}
