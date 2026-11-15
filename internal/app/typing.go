@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -299,7 +300,8 @@ func (m typingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.advancePage()
 		case tea.KeyBackspace:
 			if len(m.current) > 0 {
-				m.current = m.current[:len(m.current)-1]
+				_, size := utf8.DecodeLastRuneInString(m.current)
+				m.current = m.current[:len(m.current)-size] // one letter, not one byte
 				if m.current == "" {
 					// A full clear is a fresh restart of this word's streak
 					// eligibility: fixing every character earns the streak
@@ -384,14 +386,16 @@ func (m *typingModel) typeRune(r rune) bool {
 	if m.wordIndex >= len(m.wordList) {
 		return true
 	}
-	expected := m.wordList[m.wordIndex]
-	pos := len(m.current)
-	correct := pos < len(expected) && rune(expected[pos]) == r
+	// Positions are in runes, not bytes, so a letter like "é" is one
+	// keystroke like any other.
+	expected := []rune(m.wordList[m.wordIndex])
+	pos := utf8.RuneCountInString(m.current)
+	correct := pos < len(expected) && expected[pos] == r
 	if !correct && pos < len(expected) {
 		if m.charMistakes == nil {
 			m.charMistakes = make(map[rune]int)
 		}
-		m.charMistakes[unicode.ToLower(rune(expected[pos]))]++
+		m.charMistakes[unicode.ToLower(expected[pos])]++
 	}
 	m.tracker.RecordChar(correct, m.wordIndex)
 	m.current += string(r)
@@ -650,7 +654,7 @@ func wrapWords(list []string, start, width, maxLines int) (lines [][]int, nextSt
 	lineWidth := 0
 	i := start
 	for i < len(list) {
-		addLen := len(list[i])
+		addLen := utf8.RuneCountInString(list[i])
 		if lineWidth > 0 {
 			addLen++ // separating space
 		}

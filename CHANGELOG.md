@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- In quotes mode, a quote with a letter outside ASCII, such as "é", could
+  not be typed correctly: the right key counted as a mistake and cost HP,
+  and every letter after it in the word was checked against the wrong
+  one. Backspace could also leave half a letter behind. Letters are now
+  compared one by one, and words with them count the right number of
+  characters towards WPM.
+- Quotes with typographic punctuation (curly quotes, dashes, ellipses)
+  now use the plain ASCII a keyboard can type: `'`, `"`, `-` and `...`.
+  Invisible characters that made a word untypeable are removed, and a
+  quote ending in a closing quote mark no longer gets an extra period.
 - With `NO_COLOR` or `CLICOLOR=0` set, the typing view lost bold, underline and faint text
   along with the colours, so typed, mistyped and upcoming text all looked
   the same. Colour is now removed on its own: typed text is bold, mistakes

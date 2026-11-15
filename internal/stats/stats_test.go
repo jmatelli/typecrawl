@@ -186,3 +186,14 @@ func TestFinishPopulatesKeystrokeCVFromChars(t *testing.T) {
 		t.Fatalf("expected near-zero CV for evenly-spaced events, got %v", result.KeystrokeCV)
 	}
 }
+
+// WPM counts letters, so a word with an accented letter (two bytes in
+// UTF-8) must count the same as one without.
+func TestWordCharsCountLettersNotBytes(t *testing.T) {
+	ascii, accented := NewTracker(), NewTracker()
+	ascii.RecordWordComplete("cafe", "cafe")
+	accented.RecordWordComplete("café", "café")
+	if a, b := ascii.words[0].chars, accented.words[0].chars; a != b {
+		t.Errorf("café counts %d characters but cafe counts %d", b, a)
+	}
+}

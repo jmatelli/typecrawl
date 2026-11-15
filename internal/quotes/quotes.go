@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Quote is one quotation, identified by the API's own id so repeated
@@ -127,14 +129,36 @@ func nonEmpty(pool []Quote) []Quote {
 // trailing period first if the quote doesn't already end in one -- most do,
 // but not all source material does.
 func wordsOf(q Quote) []string {
-	text := strings.TrimSpace(q.Text)
+	text := strings.TrimSpace(typeable.Replace(norm.NFC.String(q.Text)))
 	if !endsSentence(text) {
 		text += "."
 	}
 	return strings.Fields(text)
 }
 
+// typeable swaps typographic punctuation, which quotes from the API often
+// use but most keyboards can't type directly, for the ASCII a player
+// would type instead, and drops invisible characters that would make a
+// word impossible to type. It's applied when a quote is turned into
+// words, so quotes already in the cache are covered too. The text is put
+// in composed form (NFC) first, so an accented letter is the single
+// character a keyboard sends rather than a letter plus an accent.
+var typeable = strings.NewReplacer(
+	// apostrophes and single quotes: ‘ ’ ‚ ‛ ′ ‵ ʼ ´ ‹ ›
+	"\u2018", "'", "\u2019", "'", "\u201A", "'", "\u201B", "'", "\u2032", "'", "\u2035", "'", "\u02BC", "'", "\u00B4", "'", "\u2039", "'", "\u203A", "'",
+	// double quotes: “ ” „ ‟ ″ « »
+	"\u201C", `"`, "\u201D", `"`, "\u201E", `"`, "\u201F", `"`, "\u2033", `"`, "\u00AB", `"`, "\u00BB", `"`,
+	// hyphens and dashes: ‐ ‑ ‒ – — ― −
+	"\u2010", "-", "\u2011", "-", "\u2012", "-", "\u2013", "-", "\u2014", "-", "\u2015", "-", "\u2212", "-",
+	"\u2026", "...", // …
+	// invisible: zero-width space, soft hyphen, word joiner, byte order mark
+	"\u200B", "", "\u00AD", "", "\u2060", "", "\uFEFF", "",
+)
+
+// endsSentence reports whether s ends a sentence, looking past closing
+// quotes and brackets: `"Go."` ends one.
 func endsSentence(s string) bool {
+	s = strings.TrimRight(s, `"')`)
 	if s == "" {
 		return false
 	}
