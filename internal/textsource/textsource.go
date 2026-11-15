@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -107,10 +108,19 @@ func (s Source) Name() string {
 
 // Resolve makes a source from a command-line path absolute, so the same
 // file gets the same key wherever the game is started from.
+// A symlink is followed, so a file reached by two paths keeps one set of
+// records. A path with control characters is refused: it would be shown
+// in the menu and the shared summary.
 func Resolve(kind Kind, path string) (Source, error) {
+	if strings.ContainsFunc(path, unicode.IsControl) {
+		return Source{}, errors.New("the path contains control characters")
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return Source{}, err
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
 	}
 	return Source{Kind: kind, Path: abs}, nil
 }
@@ -118,6 +128,8 @@ func Resolve(kind Kind, path string) (Source, error) {
 // MaxFileSize caps how large a file can be loaded, so a wrong path (a
 // video, a disk image) fails fast instead of filling memory.
 const MaxFileSize = 4 << 20
+
+var errTooLarge = fmt.Errorf("larger than %d MB", MaxFileSize>>20)
 
 // ErrNoWords is returned for a file with nothing to type in it.
 var ErrNoWords = errors.New("no words to type")
@@ -142,12 +154,26 @@ func Load(s Source) ([]string, error) {
 	if info.IsDir() {
 		return nil, errors.New("it's a directory")
 	}
-	if info.Size() > MaxFileSize {
-		return nil, fmt.Errorf("larger than %d MB", MaxFileSize>>20)
+	// Only a regular file: a pipe or a device such as /dev/zero has no
+	// size to check, could never end, or would be empty on the next read.
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
 	}
-	data, err := os.ReadFile(s.Path)
+	if info.Size() > MaxFileSize {
+		return nil, errTooLarge
+	}
+	f, err := os.Open(s.Path)
 	if err != nil {
 		return nil, unwrapPath(err)
+	}
+	defer f.Close()
+	// Capped again while reading, in case the file grew since the check.
+	data, err := io.ReadAll(io.LimitReader(f, MaxFileSize+1))
+	if err != nil {
+		return nil, unwrapPath(err)
+	}
+	if len(data) > MaxFileSize {
+		return nil, errTooLarge
 	}
 	return parse(data, s.Kind == WordList)
 }
@@ -168,7 +194,9 @@ func parse(data []byte, distinct bool) ([]string, error) {
 		return nil, errors.New("not UTF-8 text")
 	}
 	text := strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) || unicode.IsGraphic(r) {
+		// The zero-width joiner and non-joiner are kept: Persian and some
+		// Indic keyboards type them, and they hold emoji sequences together.
+		if unicode.IsSpace(r) || unicode.IsGraphic(r) || r == '\u200C' || r == '\u200D' {
 			return r
 		}
 		return -1 // control and other invisible characters can't be typed

@@ -99,6 +99,9 @@ func TestCustomRunsEarnXPButNoAchievementsOrChallenges(t *testing.T) {
 	if m = next.(Model); profile.KOCount != 0 {
 		t.Fatalf("expected the KO count untouched, got %d", profile.KOCount)
 	}
+	if m.results.extra.personalBest != 120 {
+		t.Fatalf("expected the knockout compared with the word list's own best of 120, got %v", m.results.extra.personalBest)
+	}
 }
 
 // Words with accents, Cyrillic and CJK are typed through to a perfect run,

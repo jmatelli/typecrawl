@@ -130,6 +130,7 @@ func TestExportImportRoundTripPreservesEverything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExportProfile: %v", err)
 	}
+	// The seeded profile has saved custom sources, so it needs version 3.
 	if exported.Version != BackupVersion || exported.IsPartial() {
 		t.Fatalf("expected a complete version %d backup, got version %d", BackupVersion, exported.Version)
 	}

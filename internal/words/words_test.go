@@ -283,7 +283,7 @@ func TestFromListIsQuickOnAHugeList(t *testing.T) {
 func TestPunctuateCapitalizesNonASCIIWholeLetters(t *testing.T) {
 	for range 20 {
 		out := Punctuate([]string{"école", "été", "жук", "über", "ok", "ça", "ñu"})
-		if out[0] != "École" {
+		if strings.TrimRight(out[0], ",.!?") != "École" {
 			t.Fatalf("expected the first word capitalized as a whole letter, got %q", out[0])
 		}
 		for _, w := range out {
@@ -294,5 +294,19 @@ func TestPunctuateCapitalizesNonASCIIWholeLetters(t *testing.T) {
 	}
 	if got := baseForm("École."); got != "école" {
 		t.Fatalf("baseForm(École.) = %q", got)
+	}
+}
+
+// A list's own capitalized words, such as German nouns, still never
+// repeat back to back, including across top-ups.
+func TestFromListAvoidsRepeatsOfCapitalizedWords(t *testing.T) {
+	list := []string{"Haus", "Baum"}
+	got := FromList(list, 1, nil)
+	for range 200 {
+		next := FromList(list, 1, nil, got...)
+		if next[0] == got[len(got)-1] {
+			t.Fatalf("expected no repeat across top-ups, got %q twice", next[0])
+		}
+		got = append(got, next...)
 	}
 }

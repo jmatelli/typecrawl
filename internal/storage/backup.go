@@ -18,8 +18,18 @@ import (
 // all (so it decodes as 0) and carried only the profile row, test history
 // (without each run's source), and personal bests. Version 2 adds
 // everything else a profile owns, so that an export can be imported back
-// without losing anything.
-const BackupVersion = 2
+// without losing anything. Version 3 is version 2 with runs on a player's
+// own word lists or texts, which builds before version 3 can't read.
+//
+// ExportProfile writes version 3 only for a profile that has such runs or
+// saved files, and version 2 otherwise, so a backup an older build can
+// read stays readable by it. An older build then refuses a version 3
+// backup with a clear "newer format" error, rather than calling one of
+// its runs invalid.
+const BackupVersion = 3
+
+// customSourcesVersion is the version a backup with custom sources needs.
+const customSourcesVersion = 3
 
 // maxBackupNameLength mirrors the profile-creation screen's cap on name
 // length, so an imported profile can't carry a name the app itself would
@@ -247,7 +257,34 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 		return nil, err
 	}
 
+	b.Version = customSourcesVersion - 1
+	if b.usesCustomSources() {
+		b.Version = customSourcesVersion
+	}
 	return b, nil
+}
+
+// usesCustomSources reports whether b holds anything only version 3 can
+// carry: a saved or selected custom source, or a run or best on one.
+func (b *Backup) usesCustomSources() bool {
+	custom := func(key string) bool {
+		src, ok := textsource.Parse(key)
+		return ok && src.Custom()
+	}
+	if len(b.CustomSources) > 0 || (b.Settings != nil && b.Settings.CustomSource != "") {
+		return true
+	}
+	for _, e := range b.History {
+		if custom(e.Source) {
+			return true
+		}
+	}
+	for _, pb := range b.PersonalBests {
+		if custom(pb.Source) {
+			return true
+		}
+	}
+	return false
 }
 
 func queryEach(tx *sql.Tx, query string, profileID int64, scan func(*sql.Rows) error) error {

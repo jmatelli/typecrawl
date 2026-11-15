@@ -136,3 +136,22 @@ func TestInOrderWrapsAndContinues(t *testing.T) {
 		t.Fatal("expected nothing from an empty text or a zero count")
 	}
 }
+
+func TestResolveRefusesControlCharacters(t *testing.T) {
+	if _, err := Resolve(Text, "evil\x1b[2J.txt"); err == nil {
+		t.Fatal("expected a path with an escape sequence refused")
+	}
+}
+
+// Persian keyboards type the zero-width non-joiner, and the zero-width
+// joiner holds emoji sequences together, so both stay.
+func TestLoadKeepsZeroWidthJoiners(t *testing.T) {
+	path := writeFile(t, "می‌خواهم 👩‍💻")
+	got, err := Load(Source{Kind: Text, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"می‌خواهم", "👩‍💻"}; !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
