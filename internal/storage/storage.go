@@ -180,6 +180,9 @@ func migrate(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "settings", "hide_battle_strip", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := addColumnIfMissing(db, "settings", "keyboard_layout", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := addColumnIfMissing(db, "test_history", "punctuation", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -533,6 +536,10 @@ type Settings struct {
 	// stored as "hide" so that the zero value, which is what profiles and
 	// backups from before the strip existed read as, shows it.
 	HideBattleStrip bool
+	// KeyboardLayout is the ID of the layout the weak-key heatmap is drawn
+	// in (see package keyboard). "" -- what profiles and backups from
+	// before layouts existed read as -- means QWERTY.
+	KeyboardLayout string
 }
 
 func defaultSettings() Settings {
@@ -542,11 +549,11 @@ func defaultSettings() Settings {
 // LoadSettings returns profileID's saved settings, or sensible defaults if
 // none have been saved yet.
 func LoadSettings(db *sql.DB, profileID int64) (Settings, error) {
-	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip FROM settings WHERE profile_id = ?`, profileID)
+	row := db.QueryRow(`SELECT mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout FROM settings WHERE profile_id = ?`, profileID)
 
 	var s Settings
 	var punctuation, zenMode, focusWeak, quotes, hideBattleStrip int
-	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip)
+	err := row.Scan(&s.Mode, &s.Duration, &s.WordCount, &punctuation, &zenMode, &focusWeak, &quotes, &hideBattleStrip, &s.KeyboardLayout)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultSettings(), nil
 	}
@@ -571,8 +578,8 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 		return 0
 	}
 	_, err := db.Exec(`
-		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO settings (profile_id, mode, duration, word_count, punctuation, zen_mode, focus_weak, quotes, hide_battle_strip, keyboard_layout)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
 			mode        = excluded.mode,
 			duration    = excluded.duration,
@@ -581,8 +588,22 @@ func SaveSettings(db *sql.DB, profileID int64, s Settings) error {
 			zen_mode    = excluded.zen_mode,
 			focus_weak  = excluded.focus_weak,
 			quotes      = excluded.quotes,
-			hide_battle_strip = excluded.hide_battle_strip
-	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak), toInt(s.Quotes), toInt(s.HideBattleStrip))
+			hide_battle_strip = excluded.hide_battle_strip,
+			keyboard_layout = excluded.keyboard_layout
+	`, profileID, s.Mode, s.Duration, s.WordCount, toInt(s.Punctuation), toInt(s.ZenMode), toInt(s.FocusWeak), toInt(s.Quotes), toInt(s.HideBattleStrip), s.KeyboardLayout)
+	return err
+}
+
+// SaveKeyboardLayout sets profileID's weak-key heatmap layout without
+// touching its other settings. A profile with no saved settings yet gets
+// the defaults for the rest.
+func SaveKeyboardLayout(db *sql.DB, profileID int64, layout string) error {
+	d := defaultSettings()
+	_, err := db.Exec(`
+		INSERT INTO settings (profile_id, mode, duration, word_count, keyboard_layout)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(profile_id) DO UPDATE SET keyboard_layout = excluded.keyboard_layout
+	`, profileID, d.Mode, d.Duration, d.WordCount, layout)
 	return err
 }
 

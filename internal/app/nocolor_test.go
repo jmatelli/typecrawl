@@ -101,7 +101,7 @@ func dumpViews() {
 	fmt.Println("=== graph")
 	fmt.Println(graph.RenderCompare("wpm", []float64{50, 55, 60, 58}, []float64{40, 50, 55, 57}, []int{2}, 60, 8))
 	fmt.Println("=== keyboard")
-	fmt.Println(keyboard.Render(map[rune]int{'a': 1, 's': 3, 'd': 6, 'f': 10}))
+	fmt.Println(keyboard.Render(map[rune]int{'a': 1, 's': 3, 'd': 6, 'f': 10}, keyboard.QWERTY))
 	fmt.Println("=== heatmap")
 	fmt.Println(heatmap.Render(map[string]int{time.Now().Format("2006-01-02"): 5, time.Now().AddDate(0, 0, -1).Format("2006-01-02"): 1}, 8))
 	fmt.Println("=== rest")

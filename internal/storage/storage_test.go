@@ -140,7 +140,7 @@ func TestResetProfileKeepsNameAndAllTimeRecordsButClearsProgress(t *testing.T) {
 
 func TestSettingsRoundTrip(t *testing.T) {
 	db, p := newTestDB(t)
-	s := Settings{Mode: "words", Duration: 60, WordCount: 100, Punctuation: true, ZenMode: true, FocusWeak: true, Quotes: true, HideBattleStrip: true}
+	s := Settings{Mode: "words", Duration: 60, WordCount: 100, Punctuation: true, ZenMode: true, FocusWeak: true, Quotes: true, HideBattleStrip: true, KeyboardLayout: "dvorak"}
 	if err := SaveSettings(db, p.ID, s); err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +172,35 @@ func TestSaveSettingsOverwritesPreviousValue(t *testing.T) {
 	got, _ := LoadSettings(db, p.ID)
 	if got.Mode != "words" || got.WordCount != 200 || !got.ZenMode {
 		t.Fatalf("expected the second save to overwrite the first, got %+v", got)
+	}
+}
+
+func TestSaveKeyboardLayoutKeepsOtherSettings(t *testing.T) {
+	db, p := newTestDB(t)
+	saved := Settings{Mode: "words", Duration: 15, WordCount: 200, ZenMode: true, HideBattleStrip: true}
+	if err := SaveSettings(db, p.ID, saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveKeyboardLayout(db, p.ID, "azerty"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadSettings(db, p.ID)
+	saved.KeyboardLayout = "azerty"
+	if got != saved {
+		t.Fatalf("LoadSettings = %+v, want %+v", got, saved)
+	}
+}
+
+func TestSaveKeyboardLayoutWithNoSavedSettings(t *testing.T) {
+	db, p := newTestDB(t)
+	if err := SaveKeyboardLayout(db, p.ID, "colemak"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadSettings(db, p.ID)
+	want := defaultSettings()
+	want.KeyboardLayout = "colemak"
+	if got != want {
+		t.Fatalf("LoadSettings = %+v, want defaults with the layout %+v", got, want)
 	}
 }
 
@@ -1139,7 +1168,7 @@ func TestMigrateShowsTheBattleStripForExistingSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.HideBattleStrip || s.Mode != "words" || !s.Punctuation {
-		t.Errorf("expected the saved settings kept and the battle strip shown, got %+v", s)
+	if s.HideBattleStrip || s.Mode != "words" || !s.Punctuation || s.KeyboardLayout != "" {
+		t.Errorf("expected the saved settings kept, the battle strip shown and the default layout, got %+v", s)
 	}
 }

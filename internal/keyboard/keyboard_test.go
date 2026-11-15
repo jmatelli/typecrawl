@@ -10,21 +10,131 @@ import (
 )
 
 func TestRenderWithNoDataStillRendersFullLayout(t *testing.T) {
-	out := Render(nil)
-	for _, row := range rows {
-		for _, r := range row {
-			if !strings.ContainsRune(out, r) {
-				t.Fatalf("expected key %q to appear in the rendered keyboard", r)
+	for _, l := range Layouts {
+		out := Render(nil, l)
+		for _, row := range l.rows {
+			for _, k := range row {
+				if !strings.ContainsRune(out, k.label()) {
+					t.Fatalf("%s: expected key %q to appear in the rendered keyboard", l.Name, k.label())
+				}
 			}
 		}
 	}
 }
 
 func TestRenderHasFourRows(t *testing.T) {
-	out := Render(map[rune]int{'j': 5})
+	for _, l := range Layouts {
+		out := Render(map[rune]int{'j': 5}, l)
+		lines := strings.Split(out, "\n")
+		if len(lines) != len(l.rows) || len(l.rows) != len(rowIndents) {
+			t.Fatalf("%s: expected %d rows, got %d", l.Name, len(rowIndents), len(lines))
+		}
+	}
+}
+
+// Every layout must have each letter exactly once, and no character on
+// two keys, or a mistake would be drawn twice or not at all.
+func TestLayoutsCoverEveryLetterOnce(t *testing.T) {
+	for _, l := range Layouts {
+		seen := map[rune]int{}
+		for _, row := range l.rows {
+			for _, k := range row {
+				for _, r := range k {
+					seen[r]++
+				}
+			}
+		}
+		for r, n := range seen {
+			if n > 1 {
+				t.Errorf("%s: %q is on %d keys", l.Name, r, n)
+			}
+		}
+		for r := 'a'; r <= 'z'; r++ {
+			if seen[r] != 1 {
+				t.Errorf("%s: letter %q is on %d keys, want 1", l.Name, r, seen[r])
+			}
+		}
+		for r := '0'; r <= '9'; r++ {
+			if seen[r] != 1 {
+				t.Errorf("%s: digit %q is on %d keys, want 1", l.Name, r, seen[r])
+			}
+		}
+	}
+}
+
+func TestLayoutIDsAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, l := range Layouts {
+		if l.ID == "" || seen[l.ID] {
+			t.Errorf("layout %q has an empty or duplicate ID", l.Name)
+		}
+		seen[l.ID] = true
+	}
+}
+
+func TestLookupFallsBackToQWERTY(t *testing.T) {
+	for _, id := range []string{"", "bépo-from-the-future"} {
+		if got := Lookup(id); got.ID != QWERTY.ID {
+			t.Errorf("Lookup(%q) = %s, want QWERTY", id, got.Name)
+		}
+	}
+	for _, l := range Layouts {
+		if got := Lookup(l.ID); got.ID != l.ID {
+			t.Errorf("Lookup(%q) = %s", l.ID, got.Name)
+		}
+	}
+}
+
+func TestNextCyclesThroughEveryLayout(t *testing.T) {
+	l := QWERTY
+	for i := 1; i <= len(Layouts); i++ {
+		l = Next(l)
+		if want := Layouts[i%len(Layouts)]; l.ID != want.ID {
+			t.Fatalf("step %d: got %s, want %s", i, l.Name, want.Name)
+		}
+	}
+}
+
+// The QWERTY rows drawn before layouts existed must not change.
+func TestQWERTYLabelsUnchanged(t *testing.T) {
+	want := []string{"1234567890", "qwertyuiop", "asdfghjkl;", "zxcvbnm,./"}
+	for i, row := range QWERTY.rows {
+		var got strings.Builder
+		for _, k := range row {
+			got.WriteRune(k.label())
+		}
+		if got.String() != want[i] {
+			t.Errorf("row %d = %q, want %q", i, got.String(), want[i])
+		}
+	}
+}
+
+// A shifted character counts toward the key that types it.
+func TestShiftedCharactersCountTowardTheirKey(t *testing.T) {
+	// On AZERTY, '1' is Shift + '&'. With the only mistakes on '1', '&'
+	// must be drawn as the hottest key.
+	hot := keyStyle(1).Render(" & ")
+	if out := Render(map[rune]int{'1': 4}, AZERTY); !strings.Contains(out, hot) {
+		t.Fatalf("expected '&' drawn as the hottest key, got:\n%s", out)
+	}
+	if out := Render(map[rune]int{'1': 4}, AZERTY); strings.Contains(out, otherLabel) {
+		t.Fatalf("'1' is on AZERTY and must not go to the other row, got:\n%s", out)
+	}
+}
+
+func TestOffLayoutCharactersGetTheirOwnRow(t *testing.T) {
+	out := Render(map[rune]int{'é': 3, 'j': 5}, QWERTY)
 	lines := strings.Split(out, "\n")
-	if len(lines) != len(rows) {
-		t.Fatalf("expected %d rows, got %d", len(rows), len(lines))
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, otherLabel) || !strings.ContainsRune(last, 'é') {
+		t.Fatalf("expected an other row with 'é', got:\n%s", out)
+	}
+	// On AZERTY 'é' has a key, so there is no other row.
+	if out := Render(map[rune]int{'é': 3, 'j': 5}, AZERTY); strings.Contains(out, otherLabel) {
+		t.Fatalf("expected no other row on AZERTY, got:\n%s", out)
+	}
+	if out := Render(map[rune]int{'j': 5}, QWERTY); strings.Contains(out, otherLabel) {
+		t.Fatalf("expected no other row without off-layout mistakes, got:\n%s", out)
 	}
 }
 
@@ -76,7 +186,7 @@ func TestRenderNeverPanicsWithEmptyMap(t *testing.T) {
 			t.Fatalf("Render panicked with an empty weights map: %v", r)
 		}
 	}()
-	_ = Render(map[rune]int{})
+	_ = Render(map[rune]int{}, QWERTY)
 }
 
 func TestRenderIgnoresCharactersNotOnTheKeyboard(t *testing.T) {
@@ -89,7 +199,7 @@ func TestRenderIgnoresCharactersNotOnTheKeyboard(t *testing.T) {
 			t.Fatalf("Render panicked with off-keyboard characters in weights: %v", r)
 		}
 	}()
-	out := Render(map[rune]int{'é': 50, 'j': 5})
+	out := Render(map[rune]int{'é': 50, 'j': 5}, QWERTY)
 	if out == "" {
 		t.Fatal("expected non-empty output")
 	}

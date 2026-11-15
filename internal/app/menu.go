@@ -63,6 +63,9 @@ type menuModel struct {
 	focusWeak   bool
 	quotes      bool // draws exercise text from cached quotes instead of random words
 	battle      bool // shows the battle strip below the words
+	// keyboardLayout isn't shown or changed here (the Weak Keys screen does
+	// that), but it's carried so saveSettings doesn't reset it.
+	keyboardLayout string
 }
 
 // indexOf finds val in opts, defaulting to 0 if it's not there -- e.g. a
@@ -97,6 +100,8 @@ func newMenuModel(profile *storage.Profile, db *sql.DB) menuModel {
 		focusWeak:   settings.FocusWeak,
 		quotes:      settings.Quotes,
 		battle:      !settings.HideBattleStrip,
+
+		keyboardLayout: settings.KeyboardLayout,
 	}
 	if settings.Mode == "words" {
 		m.mode = modeWords
@@ -117,6 +122,7 @@ func (m menuModel) saveSettings() {
 		Quotes:      m.quotes,
 
 		HideBattleStrip: !m.battle,
+		KeyboardLayout:  m.keyboardLayout,
 	})
 }
 

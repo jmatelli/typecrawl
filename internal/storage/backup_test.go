@@ -46,7 +46,7 @@ func seedFullProfile(t *testing.T, db *sql.DB) *Profile {
 	must(SetEquippedTitle(db, p.ID, "wpm_60"))
 	p.EquippedTitle = "wpm_60"
 
-	must(SaveSettings(db, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, Punctuation: true, Quotes: true, HideBattleStrip: true}))
+	must(SaveSettings(db, p.ID, Settings{Mode: "words", Duration: 60, WordCount: 50, Punctuation: true, Quotes: true, HideBattleStrip: true, KeyboardLayout: "azerty"}))
 
 	day1 := time.Date(2026, 10, 1, 23, 15, 0, 0, backupZone)
 	day2 := time.Date(2026, 10, 2, 5, 40, 0, 0, backupZone)
@@ -278,6 +278,7 @@ func TestImportProfileRejectsInvalidBackupsAndChangesNothing(t *testing.T) {
 		"negative xp":            func(b *Backup) { b.Profile.XP = -1 },
 		"control char in title":  func(b *Backup) { b.Profile.EquippedTitle = "\x07" },
 		"unknown settings mode":  func(b *Backup) { b.Settings.Mode = "sprint" },
+		"control char in layout": func(b *Backup) { b.Settings.KeyboardLayout = "dvorak\x1b[2J" },
 		"unknown history mode":   func(b *Backup) { b.History[0].Mode = "" },
 		"unknown history source": func(b *Backup) { b.History[1].Source = "books" },
 		"accuracy over 100":      func(b *Backup) { b.History[0].Accuracy = 140 },

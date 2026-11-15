@@ -54,6 +54,9 @@ On first run you'll be prompted to create a profile. From there:
   back to the menu.
 - **Profile**: `a` achievements, `h` test history, `k` weak-key heatmap, `t` cycles an equipped title,
   `r` reset, `d` delete.
+- **Weak keys**: `l` cycles the keyboard layout the heatmap is drawn in (QWERTY, AZERTY, QWERTZ,
+  Dvorak, Colemak). The choice is saved per profile. Mistyped characters the layout has no key for,
+  such as accented letters on QWERTY, are listed in an "other" row below the keyboard.
 
 Quick-launch flags skip straight to a test:
 
