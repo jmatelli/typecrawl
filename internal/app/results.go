@@ -49,6 +49,14 @@ type resultsExtra struct {
 	// for a run that missed none, and for an unverified one.
 	missedWords []string
 
+	// floor is the crawl floor this run was (Number 0 outside a crawl),
+	// floorBonusXP what clearing it paid, nextFloor the floor it leads on
+	// to (0 once the crawl is over), and deepestFloor the profile's record.
+	floor        game.CrawlFloor
+	floorBonusXP int
+	nextFloor    int
+	deepestFloor int
+
 	// unverified marks a run game.IsSuspiciousRun flagged as more likely
 	// scripted/injected input than genuine typing -- its numbers are still
 	// shown, but nothing else in extra is populated, since none of it was
@@ -73,6 +81,15 @@ func (m resultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
+	}
+	if m.extra.nextFloor > 0 {
+		// Between floors: on down, or out of the crawl.
+		switch keyMsg.String() {
+		case "enter":
+			return m, func() tea.Msg { return nextFloorMsg{} }
+		case "esc":
+			return m, func() tea.Msg { return restartMsg{} }
+		}
 	}
 	switch keyMsg.String() {
 	case "enter", "r":
@@ -126,6 +143,9 @@ func (m resultsModel) View() string {
 		if m.extra.weeklyBonusXP > 0 {
 			parts = append(parts, streakStyle.Render(fmt.Sprintf("+%d weekly challenge", m.extra.weeklyBonusXP)))
 		}
+		if m.extra.floorBonusXP > 0 {
+			parts = append(parts, streakStyle.Render(fmt.Sprintf("+%d floor %d", m.extra.floorBonusXP, m.extra.floor.Number)))
+		}
 		if len(parts) > 0 {
 			xpLine += " (" + strings.Join(parts, " + ") + ")"
 		}
@@ -168,6 +188,9 @@ func (m resultsModel) View() string {
 	}
 
 	header := titleStyle.Render("Results")
+	if line := m.floorLine(); line != "" {
+		header = lipgloss.JoinVertical(lipgloss.Left, header, line)
+	}
 
 	graphWidth := m.width
 	if graphWidth < 20 {
@@ -198,6 +221,9 @@ func (m resultsModel) unverifiedView() string {
 	warning := warnStyle.Render("Unverified run -- this looked more like scripted input than hand-typing, so it wasn't counted towards XP, personal bests, or achievements.")
 
 	header := titleStyle.Render("Results")
+	if line := m.floorLine(); line != "" {
+		header = lipgloss.JoinVertical(lipgloss.Left, header, line)
+	}
 	graphWidth := m.width
 	if graphWidth < 20 {
 		graphWidth = 80
@@ -210,7 +236,32 @@ func (m resultsModel) unverifiedView() string {
 // footer is the key help, with a note once the run has been shared. The
 // note doesn't claim the copy worked, since a terminal that ignores the
 // clipboard sequence gives no sign of it.
+// floorLine says how a crawl floor went, or "" outside a crawl.
+func (m resultsModel) floorLine() string {
+	f := m.extra.floor
+	if f.Number == 0 {
+		return ""
+	}
+	name := fmt.Sprintf("Floor %d", f.Number)
+	if f.Boss {
+		name = fmt.Sprintf("Floor %d boss", f.Number)
+	}
+	if m.extra.nextFloor > 0 {
+		return levelUpStyle.Render(name+" cleared!") + fmt.Sprintf("   HP %d/%d carries down to floor %d.", m.extra.hp, m.extra.maxHP, m.extra.nextFloor)
+	}
+	return wrongStyle.Render(fmt.Sprintf("Knocked out on %s.", strings.ToLower(name[:1])+name[1:])) +
+		fmt.Sprintf("   The crawl is over. Deepest floor: %d.", m.extra.deepestFloor)
+}
+
 func (m resultsModel) footer() string {
+	if m.extra.nextFloor > 0 {
+		next := game.FloorOf(m.extra.nextFloor, 1)
+		what := fmt.Sprintf("descend to floor %d", m.extra.nextFloor)
+		if next.Boss {
+			what += " (boss)"
+		}
+		return m.withSharedNote(helpStyle.Render("enter: " + what + "   esc: leave the crawl   s: share   q: quit"))
+	}
 	keys := "enter: restart   s: share   q: quit"
 	if n := min(len(m.extra.missedWords), drillMaxWords); n > 0 {
 		plural := "s"
@@ -223,7 +274,12 @@ func (m resultsModel) footer() string {
 		}
 		keys = "enter: restart   d: drill " + what + "   s: share   q: quit"
 	}
-	help := helpStyle.Render(keys)
+	return m.withSharedNote(helpStyle.Render(keys))
+}
+
+// withSharedNote puts the note about sharing above help, once the run
+// was shared.
+func (m resultsModel) withSharedNote(help string) string {
 	if !m.shared {
 		return help
 	}

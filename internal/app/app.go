@@ -74,6 +74,9 @@ type Model struct {
 	profile  *storage.Profile
 	profiles []*storage.Profile
 
+	// crawl is the crawl in progress, or nil outside one.
+	crawl *crawlRun
+
 	profileSelect     profileSelectModel
 	profileForm       profileModel
 	profileView       profileViewModel
@@ -119,7 +122,7 @@ type sessionRun struct {
 // letting a session skip menus it already has answers for.
 type LaunchOptions struct {
 	ProfileName string // empty: no auto-select, start at the normal profile screen
-	Mode        string // "time" or "words"; empty: select the profile but stop at the menu
+	Mode        string // "time", "words" or "crawl"; empty: select the profile but stop at the menu
 	Target      int    // seconds for "time", word count for "words"
 	Punctuation bool
 	ZenMode     bool
@@ -186,6 +189,10 @@ func NewWithOptions(db *sql.DB, profiles []*storage.Profile, opts LaunchOptions)
 		mode: mode, target: opts.Target,
 		punctuation: opts.Punctuation, zenMode: opts.ZenMode, focusWeak: opts.FocusWeak,
 		quotes: opts.Quotes, custom: opts.Custom,
+		crawl: opts.Mode == "crawl",
+	}
+	if opts.Mode == "crawl" {
+		m.menu.mode = modeCrawl
 	}
 	return m, nil
 }
@@ -286,6 +293,49 @@ func (m Model) startTyping(msg startTypingMsg) (Model, tea.Cmd) {
 	if source.Practice() {
 		m.typing = m.typing.withCustomSource(source, customWords)
 	}
+	return m.enterTyping()
+}
+
+// start begins what msg asks for: a crawl, or a single run. A queued
+// quick launch and the menu both come through here.
+func (m Model) start(msg startTypingMsg) (Model, tea.Cmd) {
+	if msg.crawl {
+		return m.startCrawl(msg.punctuation)
+	}
+	return m.startTyping(msg)
+}
+
+// crawlRun is a crawl in progress: the floor coming up, and what carries
+// to it from the floor before.
+type crawlRun struct {
+	floor       int // the next floor to play, from 1
+	hp          int
+	shield      bool // an unused golden shield
+	punctuation bool
+}
+
+// startCrawl begins a crawl at floor 1 with full HP.
+func (m Model) startCrawl(punctuation bool) (Model, tea.Cmd) {
+	m.crawl = &crawlRun{floor: 1, hp: game.MaxHP(m.profile.Level, m.profile.Prestige), punctuation: punctuation}
+	return m.startFloor()
+}
+
+// startFloor starts the crawl's next floor: the built-in words at the
+// floor's tier, with the HP and shield carried from the floor before. A
+// floor has no ghost to race and no personal best to set, since every
+// floor is a different length.
+func (m Model) startFloor() (Model, tea.Cmd) {
+	c := m.crawl
+	floor := game.FloorOf(c.floor, game.DifficultyLevel(m.profile.Level, m.profile.Prestige))
+	m.typing = newTypingModel(
+		modeWords, floor.Words, m.width, game.MaxHP(m.profile.Level, m.profile.Prestige), floor.Level,
+		c.punctuation, false, false, false, nil, words.Weak{}, nil, nil,
+	).withCrawlFloor(floor, c.hp, c.shield)
+	return m.enterTyping()
+}
+
+// enterTyping finishes setting up m.typing and switches to it.
+func (m Model) enterTyping() (Model, tea.Cmd) {
 	// The battle strip follows the profile's saved setting, so quick
 	// launches from the command line get it too.
 	settings, _ := storage.LoadSettings(m.db, m.profile.ID) // best-effort; the default shows the strip
@@ -322,7 +372,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingAutoStart != nil {
 			start := *m.pendingAutoStart
 			m.pendingAutoStart = nil
-			return m.startTyping(start)
+			return m.start(start)
 		}
 		// fall through below so the active sub-model also sees the resize
 
@@ -383,7 +433,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.profileSelect.Init()
 
 	case startTypingMsg:
-		return m.startTyping(msg)
+		return m.start(msg)
+
+	case nextFloorMsg:
+		if m.crawl == nil {
+			return m, nil
+		}
+		return m.startFloor()
 
 	case finishTypingMsg:
 		if game.IsSuspiciousRun(msg.result) {
@@ -393,6 +449,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// achievement progress.
 			m.results = newResultsModel(msg.result, m.width, resultsExtra{unverified: true})
 			m.state = stateResults
+			m.crawl = nil // the anti-cheat check ends a crawl, as it ends a run
 			run := newRunSummary(m.profile, msg, time.Now())
 			run.Verified = false
 			run.Level = m.profile.Level
@@ -402,8 +459,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		now := time.Now()
 		modeStr := modeString(msg.mode)
-		source := runSource(msg.quotes, msg.custom)
+		source := msg.source()
 		sourceStr := source.Key()
+		floor := msg.floor // Number 0 outside a crawl
 		// A run on the player's own text or a drill earns XP, but counts
 		// toward no achievement or challenge: a word list or a drill of a
 		// few short words can make those trivial. The storage queries
@@ -411,7 +469,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// left alone below. A file keeps its own personal bests; a drill,
 		// different every time, keeps none.
 		ownText := source.Practice()
-		keepsBest := source.Kind != textsource.Drill
+		keepsBest := source.Kind != textsource.Drill && source.Kind != textsource.Crawl
 
 		// Snapshot "before" state for the achievement-unlock diff below,
 		// ahead of any mutation this run causes.
@@ -486,6 +544,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Clearing a crawl floor pays a flat bonus that grows with depth,
+		// outside the streak multiplier like the challenges.
+		var floorBonusXP int
+		if floor.Number > 0 && !msg.ko {
+			floorBonusXP = game.CrawlDepthBonus(floor)
+		}
+		flatXP := challengeBonusXP + weeklyBonusXP + floorBonusXP
+
 		if !msg.ko {
 			// A knockout earns nothing -- getting overwhelmed by mistakes
 			// shouldn't still pay out.
@@ -493,8 +559,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			xpBonus = msg.xpBonus
 
 			preStreak := baseXP + xpBonus
-			totalXP := int(float64(preStreak)*game.DailyStreakMultiplier(streakDays)+0.5) + challengeBonusXP + weeklyBonusXP
-			streakBonusXP = totalXP - preStreak - challengeBonusXP - weeklyBonusXP
+			totalXP := int(float64(preStreak)*game.DailyStreakMultiplier(streakDays)+0.5) + flatXP
+			streakBonusXP = totalXP - preStreak - flatXP
 
 			newLevel, newXP, levelsGained = game.AddXP(oldLevel, m.profile.XP, totalXP)
 			m.profile.Level = newLevel
@@ -515,6 +581,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.profile.SuccessCount++
 		}
+		// The floor counts as reached whether it was cleared or not.
+		m.profile.DeepestFloor = max(m.profile.DeepestFloor, floor.Number)
+		if floor.Number > 0 {
+			personalBest = 0 // floors keep no personal best to compare with
+		}
 		// Best-effort; gameplay continues even if the write fails. A stale
 		// profile (prestiged or reset by another running copy) isn't
 		// written; reload it in place so play continues at its real level.
@@ -524,8 +595,24 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// A cleared floor leads on to the next one, carrying the HP and
+		// any unused golden shield; a knockout ends the crawl.
+		var nextFloor int
+		if c := m.crawl; c != nil && floor.Number > 0 {
+			if msg.ko {
+				m.crawl = nil
+			} else {
+				c.floor, c.hp, c.shield = floor.Number+1, msg.hp, msg.shieldLeft
+				nextFloor = c.floor
+			}
+		}
+		missedWords := msg.missedWords
+		if nextFloor > 0 {
+			missedWords = nil // a drill would leave the crawl; it's offered when the crawl ends
+		}
+
 		m.results = newResultsModel(msg.result, m.width, resultsExtra{
-			xpGained:              baseXP + xpBonus + streakBonusXP + challengeBonusXP + weeklyBonusXP,
+			xpGained:              baseXP + xpBonus + streakBonusXP + flatXP,
 			xpBase:                baseXP,
 			xpBonus:               xpBonus,
 			streakDays:            streakDays,
@@ -549,12 +636,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			weeklyBonusXP:         weeklyBonusXP,
 			weeklyDescription:     weekly.Description,
 			ghostWPMSeries:        msg.ghostWPMSeries,
-			missedWords:           msg.missedWords,
+			missedWords:           missedWords,
+			floor:                 floor,
+			floorBonusXP:          floorBonusXP,
+			nextFloor:             nextFloor,
+			deepestFloor:          m.profile.DeepestFloor,
 		})
 
 		run := newRunSummary(m.profile, msg, now)
 		run.Level = newLevel
-		run.XPGained = baseXP + xpBonus + streakBonusXP + challengeBonusXP + weeklyBonusXP
+		run.XPGained = baseXP + xpBonus + streakBonusXP + flatXP
 		run.NewPersonalBest = isNewPB
 		m.runs = append(m.runs, sessionRun{summary: run})
 
@@ -606,9 +697,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case restartMsg:
+		// Back to the menu ends any crawl; the menu stays on crawl mode
+		// if that's what was just played.
+		wasCrawl := m.crawl != nil || (len(m.runs) > 0 && m.runs[len(m.runs)-1].summary.Source == string(textsource.Crawl))
+		m.crawl = nil
 		m.menu = newMenuModel(m.profile, m.db)
+		if wasCrawl {
+			m.menu.mode = modeCrawl
+		}
 		m.state = stateMenu
 		return m, m.menu.Init()
+
 	}
 
 	var cmd tea.Cmd

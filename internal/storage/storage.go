@@ -41,13 +41,17 @@ type Profile struct {
 	// in another running copy of the game, say -- can't put the old level
 	// back.
 	Prestige int
+	// DeepestFloor is the deepest crawl floor the profile has reached,
+	// cleared or not; 0 before its first crawl. It's an all-time record,
+	// like BestWordStreak: Save only ever raises it, and a reset keeps it.
+	DeepestFloor int
 }
 
 // PrestigeLevel is the level a profile must reach to prestige.
 const PrestigeLevel = 30
 
 // profileColumns is every profiles column, in scanProfile's order.
-const profileColumns = `id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title, prestige`
+const profileColumns = `id, name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title, prestige, deepest_floor`
 
 // userDataDir returns the OS's conventional base directory for per-user
 // application data. On Linux this follows the XDG Base Directory spec's
@@ -254,6 +258,9 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := addColumnIfMissing(db, "profiles", "prestige", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "profiles", "deepest_floor", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	return repairUnreadableTimestamps(db)
@@ -487,7 +494,7 @@ func ListProfiles(db *sql.DB) ([]*Profile, error) {
 	var out []*Profile
 	for rows.Next() {
 		var p Profile
-		if err := rows.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle, &p.Prestige); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle, &p.Prestige, &p.DeepestFloor); err != nil {
 			return nil, err
 		}
 		out = append(out, &p)
@@ -1103,10 +1110,11 @@ func WeekTotalsBetween(db *sql.DB, profileID int64, from, to time.Time, minWPM f
 }
 
 // builtinSource limits a query over test_history or personal_bests to
-// runs on the game's own text: random words and quotes. Achievements and
-// challenges are judged on these alone, because a player's own word list
-// can make them trivial (a list of nothing but "a").
-const builtinSource = "source IN ('random', 'quotes')"
+// runs on the game's own text: random words, quotes and crawl floors.
+// Achievements and challenges are judged on these alone, because a
+// player's own word list or a drill can make them trivial (a list of
+// nothing but "a").
+const builtinSource = "source IN ('random', 'quotes', 'crawl')"
 
 // SaveCustomSource adds source (a textsource.Source key) to profileID's
 // saved custom sources, which the menu lets the player pick from. Saving
@@ -1622,8 +1630,8 @@ var ErrStaleProfile = errors.New("profile changed since it was loaded")
 // ErrStaleProfile, if p's prestige rank is out of date.
 func Save(db *sql.DB, p *Profile) error {
 	res, err := db.Exec(
-		`UPDATE profiles SET level = ?, xp = ?, best_word_streak = ?, ko_count = ?, success_count = ? WHERE id = ? AND prestige = ?`,
-		p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, p.ID, p.Prestige,
+		`UPDATE profiles SET level = ?, xp = ?, best_word_streak = ?, ko_count = ?, success_count = ?, deepest_floor = MAX(deepest_floor, ?) WHERE id = ? AND prestige = ?`,
+		p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, p.DeepestFloor, p.ID, p.Prestige,
 	)
 	if err != nil {
 		return err
@@ -1648,7 +1656,7 @@ func LoadProfile(db *sql.DB, id int64) (*Profile, error) {
 
 func scanProfile(row *sql.Row) (*Profile, error) {
 	var p Profile
-	if err := row.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle, &p.Prestige); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Level, &p.XP, &p.BestWordStreak, &p.KOCount, &p.SuccessCount, &p.CreatedAt, &p.EquippedTitle, &p.Prestige, &p.DeepestFloor); err != nil {
 		return nil, err
 	}
 	return &p, nil

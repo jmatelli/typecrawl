@@ -64,7 +64,7 @@ typecrawl
 
 On first run you'll be prompted to create a profile. From there:
 
-- **Menu**: `tab`/`m` switch mode, `←`/`→` or `h`/`l` change duration/word count, `s` cycles the text
+- **Menu**: `tab`/`m` switch mode (time, words or crawl), `←`/`→` or `h`/`l` change duration/word count, `s` cycles the text
   source (random words, quotes, then your saved files), `x` forgets the selected file, `c`/`z`/`f` toggle
   punctuation/zen/focus-weak, `b` toggles the battle strip, `enter` starts, `p` opens your profile, `u`
   switches profile.
@@ -77,6 +77,7 @@ On first run you'll be prompted to create a profile. From there:
   such as accented letters on QWERTY, are listed in an "other" row below the keyboard. The weakest key
   pairs are listed below it.
 - **Results**: `enter` starts another run, `d` drills the words you missed, `s` shares the run, `q` quits.
+  Between crawl floors, `enter` goes down to the next floor and `esc` leaves the crawl.
 
 Quick-launch flags skip straight to a test:
 
@@ -84,7 +85,26 @@ Quick-launch flags skip straight to a test:
 typecrawl --profile Alice --time 30 --punctuation
 typecrawl --list-profiles
 typecrawl --profile Alice --export backup.json
+typecrawl --profile Alice --crawl
 ```
+
+### Crawl
+
+Crawl mode (`tab` to it in the menu, or `--crawl`) is a run of floors, with your HP carried from one
+floor to the next. A knockout ends the crawl; you can also leave between floors.
+
+- **Floors**: floor 1 is 15 words, and each floor after it 2 more. The words move up a tier every 3
+  floors, from your own tier, and mistakes on harder words hit harder.
+- **Bosses**: every 5th floor is a boss, a tier harder than the floors around it and 10 words longer.
+- **Loot**: the special words work as usual: green heals, blue shields for a few seconds, and an unused
+  golden shield carries down to the next floor.
+- **Rewards**: each floor is saved as a run on the built-in words, with its XP, and counts toward
+  challenges and achievements, but sets no personal best, since every floor is a different length.
+  Clearing a floor adds a bonus of 5 XP times its number, doubled on a boss. The floor you're knocked
+  out on earns nothing.
+- **Record**: the deepest floor you've reached is shown on the profile page and in the menu, with
+  achievements for floors 5, 10 and 20. Punctuation can be on; zen mode, quotes, your own text and
+  focus-weak don't apply.
 
 ### Your own text
 
@@ -158,7 +178,8 @@ typecrawl --profile Alice --time 30 --json | jq .wpm
 | `profile` | profile name |
 | `finished_at` | when the run ended, RFC 3339 |
 | `mode`, `target` | `"time"` with a target in seconds, or `"words"` with a word count |
-| `source` | `"random"` words, `"quotes"`, your own `"wordlist"` or `"text"`, or a `"drill"` |
+| `source` | `"random"` words, `"quotes"`, your own `"wordlist"` or `"text"`, a `"drill"`, or a `"crawl"` floor |
+| `crawl_floor` | the crawl floor the run was, from 1; absent outside a crawl |
 | `source_name` | the word list's or text's file name, without its directory; absent for the others |
 | `punctuation`, `zen` | whether those options were on |
 | `wpm`, `accuracy` | words per minute and accuracy in percent, to two decimals |

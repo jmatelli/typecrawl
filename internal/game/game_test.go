@@ -318,3 +318,41 @@ func TestPrestigeRaisesDifficulty(t *testing.T) {
 		t.Fatalf("expected the tier bonus at prestige 1, got %d", MaxHP(1, 1))
 	}
 }
+
+func TestFloorOf(t *testing.T) {
+	cases := []struct {
+		n, level  int
+		words     int
+		tierLevel int
+		boss      bool
+	}{
+		{1, 1, 15, 1, false},
+		{2, 1, 17, 1, false},
+		{3, 1, 19, 1, false},
+		{4, 1, 21, 11, false}, // a tier up every 3 floors
+		{5, 1, 33, 21, true},  // boss: a tier above floor 4, 10 words longer
+		{6, 1, 25, 11, false},
+		{10, 1, 43, 41, true},
+		{0, 1, 15, 1, false}, // below 1 is floor 1
+		{1, 25, 15, 25, false},
+	}
+	for _, c := range cases {
+		f := FloorOf(c.n, c.level)
+		if f.Words != c.words || f.Level != c.tierLevel || f.Boss != c.boss {
+			t.Errorf("FloorOf(%d, %d) = %+v, want words %d level %d boss %v", c.n, c.level, f, c.words, c.tierLevel, c.boss)
+		}
+	}
+	// Deep floors stay at the hardest tier rather than overflowing.
+	if f := FloorOf(1000, 1); words.Tier(f.Level) != words.Tier(1000) {
+		t.Fatalf("expected the hardest tier, got level %d", f.Level)
+	}
+}
+
+func TestCrawlDepthBonus(t *testing.T) {
+	if got := CrawlDepthBonus(FloorOf(3, 1)); got != 15 {
+		t.Errorf("floor 3 bonus = %d, want 15", got)
+	}
+	if got := CrawlDepthBonus(FloorOf(5, 1)); got != 50 {
+		t.Errorf("boss floor 5 bonus = %d, want 50 (doubled)", got)
+	}
+}

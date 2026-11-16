@@ -23,6 +23,7 @@ func TestKeyRoundTrips(t *testing.T) {
 		{Kind: Random},
 		{Kind: Quotes},
 		{Kind: Drill},
+		{Kind: Crawl},
 		{Kind: WordList, Path: "/home/me/french.txt"},
 		{Kind: Text, Path: `C:\Users\me\code: notes.txt`},
 	} {

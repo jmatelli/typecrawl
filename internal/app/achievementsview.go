@@ -119,6 +119,8 @@ func buildAchievementProgress(db *sql.DB, profile *storage.Profile, dailyStreak 
 	return achievements.Progress{
 		Level:    profile.Level,
 		Prestige: profile.Prestige,
+
+		DeepestFloor: profile.DeepestFloor,
 		// Only successful (non-KO) runs count as "completed" -- a
 		// knockout already has its own dedicated achievement line (see
 		// ko_1/ko_5/ko_10), so folding it in here too would both

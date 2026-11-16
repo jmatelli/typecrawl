@@ -35,6 +35,7 @@ type Progress struct {
 	QuoteRunCount          int  // exercises completed in quotes mode
 	TotalWordsTyped        int  // lifetime words typed across all exercises
 	TotalPlaySeconds       int  // lifetime exercise duration, across all exercises
+	DeepestFloor           int  // deepest crawl floor reached
 }
 
 // Tier ranks how impressive an achievement is, independent of its
@@ -155,6 +156,17 @@ var All = []Achievement{
 	{ID: "prestige_5", Name: "Eternal Return", Description: "Prestige 5 times", Tier: Grandmaster,
 		check:    func(p Progress) bool { return p.Prestige >= 5 },
 		progress: numericProgress(func(p Progress) float64 { return float64(p.Prestige) }, 5)},
+
+	// Crawl depth: the deepest floor reached, every 5th being a boss.
+	{ID: "crawl_5", Name: "Delver", Description: "Reach floor 5 of a crawl, the first boss", Tier: Bronze,
+		check:    func(p Progress) bool { return p.DeepestFloor >= 5 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.DeepestFloor) }, 5)},
+	{ID: "crawl_10", Name: "Into the Depths", Description: "Reach floor 10 of a crawl", Tier: Silver,
+		check:    func(p Progress) bool { return p.DeepestFloor >= 10 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.DeepestFloor) }, 10)},
+	{ID: "crawl_20", Name: "Abyss Walker", Description: "Reach floor 20 of a crawl", Tier: Gold,
+		check:    func(p Progress) bool { return p.DeepestFloor >= 20 },
+		progress: numericProgress(func(p Progress) float64 { return float64(p.DeepestFloor) }, 20)},
 
 	{ID: "wpm_30", Name: "30 WPM Club", Description: "Hit 30 WPM in a test", Tier: Bronze,
 		check:    func(p Progress) bool { return p.BestWPM >= 30 },

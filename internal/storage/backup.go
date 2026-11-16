@@ -20,8 +20,8 @@ import (
 // (without each run's source), and personal bests. Version 2 adds
 // everything else a profile owns, so that an export can be imported back
 // without losing anything. Version 3 is version 2 with runs on a player's
-// own word lists or texts, or drills, which builds before version 3 can't
-// read.
+// own word lists or texts, drills, or crawl floors, which builds before
+// version 3 can't read.
 //
 // ExportProfile writes version 3 only for a profile that has such runs or
 // saved files, and version 2 otherwise, so a backup an older build can
@@ -312,7 +312,7 @@ func ExportProfile(db *sql.DB, id int64, now time.Time) (*Backup, error) {
 func (b *Backup) usesCustomSources() bool {
 	custom := func(key string) bool {
 		src, ok := textsource.Parse(key)
-		return ok && src.Practice()
+		return ok && src.Kind != textsource.Random && src.Kind != textsource.Quotes
 	}
 	if len(b.CustomSources) > 0 || (b.Settings != nil && b.Settings.CustomSource != "") {
 		return true
@@ -382,9 +382,9 @@ func ImportProfile(db *sql.DB, b *Backup, name string) (*Profile, error) {
 		createdAt = time.Now()
 	}
 	res, err := tx.Exec(`
-		INSERT INTO profiles (name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title, prestige)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, name, p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, dbTime(createdAt), p.EquippedTitle, p.Prestige)
+		INSERT INTO profiles (name, level, xp, best_word_streak, ko_count, success_count, created_at, equipped_title, prestige, deepest_floor)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, name, p.Level, p.XP, p.BestWordStreak, p.KOCount, p.SuccessCount, dbTime(createdAt), p.EquippedTitle, p.Prestige, p.DeepestFloor)
 	if err != nil {
 		return nil, err
 	}
@@ -543,7 +543,7 @@ func (b *Backup) validate() error {
 	}
 
 	p := b.Profile
-	if p.Level < 1 || p.XP < 0 || p.BestWordStreak < 0 || p.KOCount < 0 || p.SuccessCount < 0 || p.Prestige < 0 {
+	if p.Level < 1 || p.XP < 0 || p.BestWordStreak < 0 || p.KOCount < 0 || p.SuccessCount < 0 || p.Prestige < 0 || p.DeepestFloor < 0 {
 		return errors.New("profile has a level below 1 or a negative counter")
 	}
 	if strings.ContainsFunc(p.EquippedTitle, unicode.IsControl) {
@@ -577,7 +577,7 @@ func (b *Backup) validate() error {
 	}
 	seen := make(map[bestKey]bool, len(b.PersonalBests))
 	for i, pb := range b.PersonalBests {
-		if !validMode(pb.Mode) || !validSource(pb.Source) || pb.Source == string(textsource.Drill) || pb.WPM < 0 || pb.Accuracy < 0 || pb.Accuracy > 100 || pb.AchievedAt.IsZero() {
+		if !validMode(pb.Mode) || !validSource(pb.Source) || (pb.Source == string(textsource.Drill) || pb.Source == string(textsource.Crawl)) || pb.WPM < 0 || pb.Accuracy < 0 || pb.Accuracy > 100 || pb.AchievedAt.IsZero() {
 			return fmt.Errorf("personal best %d is not valid", i)
 		}
 		k := bestKey{pb.Mode, sourceOrDefault(pb.Source), pb.Target}
