@@ -94,12 +94,15 @@ Crawl mode (`tab` to it in the menu, or `--crawl`) is a run of floors, with your
 floor to the next. A knockout ends the crawl; you can also leave between floors.
 
 - **Floors**: floor 1 is 15 words, and each floor after it 2 more. The words move up a tier every 3
-  floors, from your own tier, and mistakes on harder words hit harder.
+  floors, from your tier when the crawl began, and mistakes on harder words hit harder.
 - **Bosses**: every 5th floor is a boss, a tier harder than the floors around it and 10 words longer.
-- **Loot**: the special words work as usual: green heals, blue shields for a few seconds, and an unused
-  golden shield carries down to the next floor.
+- **Loot**: the special words work as usual: green heals (a floor started below full HP heals on its
+  first clean streak), blue shields for a few seconds, and an unused golden shield carries down to the
+  next floor.
 - **Rewards**: each floor is saved as a run on the built-in words, with its XP, and counts toward
-  challenges and achievements, but sets no personal best, since every floor is a different length.
+  challenges and achievements, speed and punctuation ones included, but sets no personal best, since
+  every floor is a different length. When the crawl ends, `d` drills the words you missed on every
+  floor.
   Clearing a floor adds a bonus of 5 XP times its number, doubled on a boss. The floor you're knocked
   out on earns nothing.
 - **Record**: the deepest floor you've reached is shown on the profile page and in the menu, with

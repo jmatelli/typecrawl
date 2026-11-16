@@ -181,10 +181,7 @@ func (m profileViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // achievementProgress bundles this profile's current stats into the shape
 // the achievements package evaluates against.
 func (m profileViewModel) achievementProgress() achievements.Progress {
-	var bestWPM float64
-	if m.bestOverall != nil {
-		bestWPM = m.bestOverall.WPM
-	}
+	bestWPM, _ := storage.AchievementWPM(m.db, m.profile.ID)
 	return buildAchievementProgress(m.db, m.profile, m.streakDays, bestWPM)
 }
 

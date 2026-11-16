@@ -94,11 +94,11 @@ func main() {
 	}
 	hasMode := *timeFlag != 0 || *wordsFlag != 0 || *crawlFlag
 	if hasMode && *profileFlag == "" {
-		fmt.Fprintln(os.Stderr, "error: --time/--words requires --profile")
+		fmt.Fprintln(os.Stderr, "error: --time/--words/--crawl requires --profile")
 		os.Exit(1)
 	}
 	if (*punctuationFlag || *zenFlag || *focusWeakFlag || *quotesFlag || *wordlistFlag != "" || *textFlag != "") && !hasMode {
-		fmt.Fprintln(os.Stderr, "error: --punctuation/--zen/--focus-weak/--quotes/--wordlist/--text requires --time or --words")
+		fmt.Fprintln(os.Stderr, "error: --punctuation/--zen/--focus-weak/--quotes/--wordlist/--text requires --time, --words or --crawl")
 		os.Exit(1)
 	}
 	sources := 0

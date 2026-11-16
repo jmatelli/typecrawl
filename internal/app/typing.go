@@ -650,9 +650,11 @@ func (m *typingModel) completeWord() {
 			// *after* next instead gives it one real word's worth of
 			// lead time to be seen coming, same as a golden word.
 			//
-			// A flawless run so far is at full HP, where a heal would be
-			// wasted, so it gets a blue (timed shield) word instead.
-			if m.anyMistake {
+			// A flawless run so far at full HP, where a heal would be
+			// wasted, gets a blue (timed shield) word instead. A crawl
+			// floor can start below full HP with no mistake yet, and
+			// then a heal is what it needs.
+			if m.anyMistake || m.hp < m.maxHP {
 				m.greenWordIdx = m.wordIndex + 2
 			} else {
 				m.blueWordIdx = m.wordIndex + 2

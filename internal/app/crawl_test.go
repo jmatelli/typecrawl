@@ -261,3 +261,136 @@ func TestSharedCrawlFloor(t *testing.T) {
 		t.Fatalf("expected the crawl floor in the summary, got %+v:\n%s", run, run.Text())
 	}
 }
+
+// The floors' tiers count from the level the crawl began at, so a
+// level-up during it doesn't move later floors up a tier early.
+func TestLevelUpDuringACrawlKeepsTheFloorTiers(t *testing.T) {
+	m, profile := newTestApp(t)
+	profile.Level = 9
+	m, _ = m.startCrawl(false)
+	profile.Level = 10 // levelled up on floor 1
+	m.crawl.floor = 2
+	m, _ = m.startFloor()
+	if want := game.FloorOf(2, game.DifficultyLevel(9, 0)).Level; m.typing.level != want {
+		t.Fatalf("expected floor 2 at level %d, got %d", want, m.typing.level)
+	}
+	if m.typing.maxHP != game.MaxHP(10, 0) {
+		t.Fatal("expected the max HP to follow the new level")
+	}
+}
+
+// A floor started below full HP heals on a clean streak, even with no
+// mistake on it yet.
+func TestCleanStreakHealsCarriedHP(t *testing.T) {
+	list := make([]string, 20)
+	for i := range list {
+		list[i] = "ok"
+	}
+	m := newTestTypingModel(modeWords, list, 100).withCrawlFloor(game.FloorOf(2, 1), 40, false)
+	for range game.GreenWordStreakInterval {
+		m = typeString(m, "ok")
+		m = pressSpace(m)
+	}
+	if m.greenWordIdx == -1 || m.blueWordIdx != -1 {
+		t.Fatalf("expected a green heal coming up, got green %d blue %d", m.greenWordIdx, m.blueWordIdx)
+	}
+}
+
+// Missed words from every floor make up the drill when the crawl ends;
+// esc on that last screen goes to the menu rather than quitting.
+func TestCrawlEndsWithADrillOfEveryFloor(t *testing.T) {
+	m, _ := newTestApp(t)
+	m, _ = m.startCrawl(false)
+	finish := func(ko bool, missed ...string) {
+		next, _ := m.update(finishTypingMsg{
+			result: stats.Result{WPM: 40, Accuracy: 90, Duration: 20 * time.Second},
+			mode:   modeWords, target: m.typing.target, hp: 60, maxHP: 100, ko: ko,
+			floor: m.typing.floor, missedWords: missed,
+		})
+		m = past(next.(Model))
+	}
+	finish(false, "alpha", "beta")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runCmd(next.(Model), cmd)
+	finish(true, "beta", "gamma")
+	if got := m.results.extra.missedWords; len(got) != 3 || got[0] != "alpha" || got[2] != "gamma" {
+		t.Fatalf("expected the drill to cover both floors once each, got %q", got)
+	}
+	_, cmd = m.results.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if _, quit := cmd().(tea.QuitMsg); quit {
+		t.Fatal("expected esc to leave for the menu, not quit")
+	}
+	m = runCmd(m, cmd)
+	if m.state != stateMenu {
+		t.Fatalf("expected the menu, got %v", m.state)
+	}
+}
+
+// A second enter before the next floor appears doesn't start it again.
+func TestDoubleEnterDoesNotRestartTheFloor(t *testing.T) {
+	m, _ := newTestApp(t)
+	m, _ = m.startCrawl(false)
+	m = typeFloor(t, m, 0)
+	next, _ := m.update(nextFloorMsg{})
+	m = next.(Model)
+	m, _ = pressKey(t, m, m.typing.wordList[0][:1])
+	words := m.typing.wordList
+	next, _ = m.update(nextFloorMsg{})
+	m = next.(Model)
+	if m.typing.current == "" || &m.typing.wordList[0] != &words[0] {
+		t.Fatal("expected the floor in progress to be left alone")
+	}
+}
+
+// After a crawl, the menu returns to crawl mode once, from the results;
+// coming back from another screen keeps whatever mode was picked since.
+func TestMenuKeepsAModePickedAfterACrawl(t *testing.T) {
+	m, profile := newTestApp(t)
+	m, _ = m.startCrawl(false)
+	next, _ := m.update(finishTypingMsg{
+		result: stats.Result{WPM: 40, Accuracy: 90, Duration: 20 * time.Second},
+		mode:   modeWords, target: m.typing.target, maxHP: 100, ko: true, floor: m.typing.floor,
+	})
+	m = past(next.(Model))
+	m = runCmd(m, func() tea.Msg { return restartMsg{} })
+	if m.menu.mode != modeCrawl {
+		t.Fatal("expected crawl mode after the crawl")
+	}
+	m.menu = press(t, m.menu, 'm') // to time
+	m = runCmd(m, func() tea.Msg { return viewProfileMsg{} })
+	m = runCmd(m, func() tea.Msg { return restartMsg{} })
+	if m.menu.mode == modeCrawl {
+		t.Fatal("expected the menu not to jump back to crawl from the profile")
+	}
+	_ = profile
+}
+
+func TestUnverifiedFloorSaysTheCrawlIsOver(t *testing.T) {
+	m, _ := newTestApp(t)
+	m, _ = m.startCrawl(false)
+	next, _ := m.update(finishTypingMsg{
+		result: stats.Result{WPM: game.MaxPlausibleWPM + 1, Accuracy: 100, Duration: 5 * time.Second},
+		mode:   modeWords, target: m.typing.target, floor: m.typing.floor,
+	})
+	if view := next.(Model).results.View(); !containsSubstring(view, "The crawl is over: floor 1 looked scripted.") {
+		t.Fatalf("expected the crawl's end explained, got:\n%s", view)
+	}
+}
+
+func TestForgetDoesNothingInCrawlMode(t *testing.T) {
+	m := newTestMenuModel(t)
+	if err := storage.SaveCustomSource(m.db, m.profile.ID, "wordlist:/a.txt", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s := storage.Settings{Mode: "time", Duration: 30, WordCount: 100, CustomSource: "wordlist:/a.txt"}
+	if err := storage.SaveSettings(m.db, m.profile.ID, s); err != nil {
+		t.Fatal(err)
+	}
+	m = newMenuModel(m.profile, m.db)
+	m = press(t, m, 'm')
+	m = press(t, m, 'm')
+	m = press(t, m, 'x')
+	if saved, _ := storage.ListCustomSources(m.db, m.profile.ID); len(saved) != 1 {
+		t.Fatal("expected x in crawl mode to forget nothing")
+	}
+}

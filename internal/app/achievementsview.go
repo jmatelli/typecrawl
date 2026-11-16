@@ -171,12 +171,7 @@ type achievementsViewModel struct {
 
 func newAchievementsViewModel(profile *storage.Profile, db *sql.DB) achievementsViewModel {
 	streakDays, _ := storage.CurrentStreak(db, profile.ID, time.Now())
-	bestOverall, _ := storage.BestOverallWPM(db, profile.ID)
-
-	var bestWPM float64
-	if bestOverall != nil {
-		bestWPM = bestOverall.WPM
-	}
+	bestWPM, _ := storage.AchievementWPM(db, profile.ID)
 
 	return achievementsViewModel{
 		profile:  profile,
