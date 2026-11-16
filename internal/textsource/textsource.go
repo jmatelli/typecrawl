@@ -30,6 +30,11 @@ const (
 	// Drill is a run built from the words the player missed in the run
 	// before it, typed in the order given. It has no file.
 	Drill Kind = "drill"
+	// Crawl is a floor of crawl mode: the built-in random words, at the
+	// floor's tier. Unlike the player's own text it counts toward
+	// achievements and challenges, but it keeps no personal bests, since
+	// every floor has a different length.
+	Crawl Kind = "crawl"
 )
 
 // Source is one source of exercise text. The zero value is Random.
@@ -66,7 +71,7 @@ func (s Source) Key() string {
 	switch s.Kind {
 	case WordList, Text:
 		return string(s.Kind) + ":" + s.Path
-	case Quotes, Drill:
+	case Quotes, Drill, Crawl:
 		return string(s.Kind)
 	default:
 		return string(Random)
@@ -82,6 +87,8 @@ func Parse(key string) (s Source, ok bool) {
 		return Source{Kind: Quotes}, true
 	case string(Drill):
 		return Source{Kind: Drill}, true
+	case string(Crawl):
+		return Source{Kind: Crawl}, true
 	}
 	kind, path, found := strings.Cut(key, ":")
 	if !found || path == "" || (kind != string(WordList) && kind != string(Text)) {
@@ -115,6 +122,8 @@ func (s Source) Name() string {
 		return "Quotes"
 	case Drill:
 		return "Drill"
+	case Crawl:
+		return "Crawl"
 	default:
 		return "Random words"
 	}

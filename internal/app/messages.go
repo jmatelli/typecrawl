@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/jmatelli/typecrawl/internal/game"
 	"github.com/jmatelli/typecrawl/internal/stats"
 	"github.com/jmatelli/typecrawl/internal/textsource"
 )
@@ -14,6 +15,9 @@ type startTypingMsg struct {
 	quotes      bool
 	custom      textsource.Source // a player's word list or text, or a drill; overrides quotes when set
 	drillWords  []string          // a drill's words, in order, when custom is a drill
+	// crawl starts a new crawl instead, at floor 1 with full HP; of the
+	// rest only punctuation applies.
+	crawl bool
 }
 
 type finishTypingMsg struct {
@@ -28,6 +32,8 @@ type finishTypingMsg struct {
 	charMistakes map[rune]int      // this run's per-character mistake counts
 	pairMistakes map[string]int    // this run's mistakes by key pair (see typingModel.pairMistakes)
 	missedWords  []string          // the words this run got wrong, each once, for a drill
+	floor        game.CrawlFloor   // the crawl floor this run was; Number 0 outside a crawl
+	shieldLeft   bool              // a golden shield still unused at the end, which a crawl carries to the next floor
 	hitCount     int               // how many mistakes actually dealt (or would deal) HP damage
 	punctuation  bool              // whether punctuation was enabled this run
 	zenMode      bool              // whether zen mode was enabled this run
@@ -44,6 +50,15 @@ type finishTypingMsg struct {
 	specialLanded specialWords // special words landed clean this run
 }
 
+// source is what the run typed from: a crawl floor, or as runSource says.
+// Saving a run and summarizing it both go through it, so they agree.
+func (msg finishTypingMsg) source() textsource.Source {
+	if msg.floor.Number > 0 {
+		return textsource.Source{Kind: textsource.Crawl}
+	}
+	return runSource(msg.quotes, msg.custom)
+}
+
 // specialWords counts golden, green and blue words.
 type specialWords struct{ golden, green, blue int }
 
@@ -52,6 +67,9 @@ type restartMsg struct{}
 // startDrillMsg asks for a drill of words, the ones the run on the results
 // screen missed.
 type startDrillMsg struct{ words []string }
+
+// nextFloorMsg asks for the next floor of the crawl in progress.
+type nextFloorMsg struct{}
 
 type viewProfileMsg struct{}
 type switchProfileMsg struct{}

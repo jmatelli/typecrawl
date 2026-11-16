@@ -257,3 +257,58 @@ func AddXP(level, xp, gained int) (newLevel, newXP, levelsGained int) {
 	}
 	return level, xp, levelsGained
 }
+
+// Crawl mode: a run of floors, each a short words exercise, with HP
+// carried from one floor to the next. A knockout ends the crawl.
+const (
+	// CrawlFirstFloorWords is how many words floor 1 has; each floor
+	// after it has CrawlWordsPerFloor more.
+	CrawlFirstFloorWords = 15
+	CrawlWordsPerFloor   = 2
+	// CrawlFloorsPerTier is how many floors pass before the words move up
+	// a tier.
+	CrawlFloorsPerTier = 3
+	// CrawlBossEvery makes every Nth floor a boss: a tier harder than the
+	// floors around it, and CrawlBossExtraWords longer.
+	CrawlBossEvery      = 5
+	CrawlBossExtraWords = 10
+	// CrawlDepthBonusPerFloor is the flat XP for clearing a floor, times
+	// its number, doubled on a boss floor.
+	CrawlDepthBonusPerFloor = 5
+)
+
+// CrawlFloor describes one floor of a crawl.
+type CrawlFloor struct {
+	Number int
+	Words  int  // how many words it has
+	Level  int  // the difficulty level its words and damage are drawn at (see words.Tier)
+	Boss   bool // a boss floor: harder and longer
+}
+
+// FloorOf returns floor number n (from 1) of a crawl started by a profile
+// playing at difficultyLevel (see DifficultyLevel). The words move a tier
+// up every CrawlFloorsPerTier floors, from the profile's own tier, until
+// the hardest tier; a boss floor is one tier above its neighbours.
+func FloorOf(n, difficultyLevel int) CrawlFloor {
+	n = max(n, 1)
+	f := CrawlFloor{Number: n, Boss: n%CrawlBossEvery == 0}
+	f.Words = CrawlFirstFloorWords + (n-1)*CrawlWordsPerFloor
+	steps := (n - 1) / CrawlFloorsPerTier
+	if f.Boss {
+		f.Words += CrawlBossExtraWords
+		steps++
+	}
+	// Tiers are 10 levels apart (see words.Tier); past the last one
+	// words.Tier caps it.
+	f.Level = difficultyLevel + 10*min(steps, 10)
+	return f
+}
+
+// CrawlDepthBonus is the XP for clearing f, on top of the floor's own XP.
+func CrawlDepthBonus(f CrawlFloor) int {
+	bonus := CrawlDepthBonusPerFloor * f.Number
+	if f.Boss {
+		bonus *= 2
+	}
+	return bonus
+}

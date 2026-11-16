@@ -113,6 +113,10 @@ type typingModel struct {
 	// doesn't walk the whole list again.
 	customWeights []int
 
+	// floor is the crawl floor this run is, or Number 0 outside a crawl
+	// (see withCrawlFloor).
+	floor game.CrawlFloor
+
 	// ghostPaceMS is the personal best's per-word cumulative elapsed
 	// milliseconds for this exact mode/target, if one exists -- raced live
 	// against via ghostStatus. nil means no PB to race yet.
@@ -256,6 +260,19 @@ func (m typingModel) withCustomSource(src textsource.Source, loaded []string) ty
 	}
 	m.wordList = m.genWords(n)
 	m.goldenWordIdx = rollGoldenWordIndex(len(m.wordList))
+	return m
+}
+
+// withCrawlFloor makes the run floor f of a crawl, starting with the hp
+// and golden shield the floor before it ended with: they carry from floor
+// to floor. The constructor already drew f's words at f's level; that
+// level also sets how hard mistakes hit. A crawl has no zen mode, which
+// would make the HP pointless.
+func (m typingModel) withCrawlFloor(f game.CrawlFloor, hp int, shield bool) typingModel {
+	m.floor = f
+	m.hp = min(max(hp, 1), m.maxHP)
+	m.shieldActive = shield
+	m.zenMode = false
 	return m
 }
 
@@ -739,6 +756,7 @@ func (m typingModel) finish() (tea.Model, tea.Cmd) {
 		xpBonus: xpBonus, bestCombo: bestCombo,
 		mode: mode, target: target, charMistakes: charMistakes,
 		pairMistakes: pairMistakes, missedWords: missedWords,
+		floor: m.floor, shieldLeft: m.shieldActive,
 		hitCount:    hitCount,
 		punctuation: punctuation, zenMode: zenMode, quotes: quotesMode, custom: custom, wordsTyped: wordsTyped,
 		ghostWPMSeries: ghostWPMSeries,
@@ -807,6 +825,12 @@ func (m typingModel) View() string {
 		header = fmt.Sprintf("Time left: %ds", int(remaining.Seconds()+0.999))
 	} else {
 		header = fmt.Sprintf("Word %d/%d", m.wordIndex+1, m.target)
+		if m.floor.Number > 0 {
+			header = fmt.Sprintf("Floor %d   %s", m.floor.Number, header)
+			if m.floor.Boss {
+				header += "   " + wrongStyle.Render("BOSS")
+			}
+		}
 	}
 	if m.focusWeak {
 		header += "   " + streakStyle.Render("[focus: weak keys]")

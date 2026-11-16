@@ -104,7 +104,7 @@ func TestCheckAndProgressAgreeForEveryThresholdAchievement(t *testing.T) {
 	probes := []Progress{
 		{},
 		{
-			Level: 1000, Prestige: 1_000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
+			Level: 1000, Prestige: 1_000, DeepestFloor: 1_000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
 			DailyStreak: 1_000_000, BestWPM: 100_000, PerfectRunCount: 1_000_000, MaxPerfectStreak: 1_000_000,
 			ComebackCount: 1_000_000, PunctuationRunCount: 1_000_000, ZenRunCount: 1_000_000,
 			TotalWordsTyped: 1_000_000_000, TotalPlaySeconds: 1_000_000_000,
@@ -150,7 +150,7 @@ func TestUnlockedCountZeroForZeroProgress(t *testing.T) {
 
 func TestUnlockedCountAllForMaxedProgress(t *testing.T) {
 	maxed := Progress{
-		Level: 1000, Prestige: 1_000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
+		Level: 1000, Prestige: 1_000, DeepestFloor: 1_000, TotalExercises: 1_000_000, BestWordStreak: 1_000_000, KOCount: 1_000_000,
 		DailyStreak: 1_000_000, BestWPM: 100_000, PerfectRunCount: 1_000_000, MaxPerfectStreak: 1_000_000,
 		CompletedLongHaul: true, CompletedSprint: true, PracticedLateNight: true, PracticedEarlyMorning: true,
 		HasBestInBothModes: true, PracticedAllWeekdays: true, HadBigDay: true, CompletedUltraLongHaul: true,
@@ -296,5 +296,33 @@ func TestLevelAchievementsSurvivePrestige(t *testing.T) {
 	}
 	if levelReached(Progress{Level: 3}) != 3 || levelReached(Progress{Level: 3, Prestige: 2}) != 30 || levelReached(Progress{Level: 34, Prestige: 1}) != 34 {
 		t.Error("levelReached: wrong level")
+	}
+}
+
+func TestCrawlDepthAchievements(t *testing.T) {
+	byID := map[string]Achievement{}
+	for _, a := range All {
+		byID[a.ID] = a
+	}
+	for _, c := range []struct {
+		floor    int
+		unlocked []string
+		locked   []string
+	}{
+		{4, nil, []string{"crawl_5", "crawl_10", "crawl_20"}},
+		{5, []string{"crawl_5"}, []string{"crawl_10"}},
+		{20, []string{"crawl_5", "crawl_10", "crawl_20"}, nil},
+	} {
+		p := Progress{DeepestFloor: c.floor}
+		for _, id := range c.unlocked {
+			if !byID[id].Unlocked(p) {
+				t.Errorf("floor %d: expected %s unlocked", c.floor, id)
+			}
+		}
+		for _, id := range c.locked {
+			if byID[id].Unlocked(p) {
+				t.Errorf("floor %d: expected %s locked", c.floor, id)
+			}
+		}
 	}
 }

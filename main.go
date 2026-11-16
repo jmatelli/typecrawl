@@ -62,6 +62,7 @@ func main() {
 	focusWeakFlag := flag.Bool("focus-weak", false, "quick-launch: bias word choice toward your weakest keys (requires --time or --words)")
 	quotesFlag := flag.Bool("quotes", false, "quick-launch: use quotes instead of random words (implies punctuation; requires --time or --words)")
 	wordlistFlag := flag.String("wordlist", "", "quick-launch: draw words at random from this file of your own, separated by spaces or lines (requires --time or --words); it's saved to the profile for the menu")
+	crawlFlag := flag.Bool("crawl", false, "quick-launch: start a crawl, floors of words with HP carried between them (requires --profile; --punctuation is the only option it takes)")
 	textFlag := flag.String("text", "", "quick-launch: type this text file of your own in order (requires --time or --words); it's saved to the profile for the menu")
 	listProfilesFlag := flag.Bool("list-profiles", false, "list saved profiles and exit")
 	exportFlag := flag.String("export", "", "export a profile to this JSON file path and exit (requires --profile)")
@@ -81,7 +82,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: specify only one of --time or --words")
 		os.Exit(1)
 	}
-	hasMode := *timeFlag != 0 || *wordsFlag != 0
+	if *crawlFlag {
+		if *timeFlag != 0 || *wordsFlag != 0 || *zenFlag || *focusWeakFlag || *quotesFlag || *wordlistFlag != "" || *textFlag != "" {
+			fmt.Fprintln(os.Stderr, "error: --crawl sets its own floors and words; of the run options it only takes --punctuation")
+			os.Exit(1)
+		}
+		if *profileFlag == "" {
+			fmt.Fprintln(os.Stderr, "error: --crawl requires --profile")
+			os.Exit(1)
+		}
+	}
+	hasMode := *timeFlag != 0 || *wordsFlag != 0 || *crawlFlag
 	if hasMode && *profileFlag == "" {
 		fmt.Fprintln(os.Stderr, "error: --time/--words requires --profile")
 		os.Exit(1)
@@ -219,7 +230,9 @@ func main() {
 	}
 
 	opts := app.LaunchOptions{ProfileName: *profileFlag, Punctuation: *punctuationFlag, ZenMode: *zenFlag, FocusWeak: *focusWeakFlag, Quotes: *quotesFlag, Custom: custom, Clipboard: screen}
-	if *timeFlag != 0 {
+	if *crawlFlag {
+		opts.Mode = "crawl"
+	} else if *timeFlag != 0 {
 		opts.Mode = "time"
 		opts.Target = *timeFlag
 	} else if *wordsFlag != 0 {

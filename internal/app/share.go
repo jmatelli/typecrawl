@@ -38,9 +38,12 @@ type RunSummary struct {
 	WordStreak      int     `json:"word_streak"` // longest mistake-free word streak in the run
 	Level           int     `json:"level"`       // the profile's level after the run
 	Prestige        int     `json:"prestige"`    // the profile's prestige rank
-	XPGained        int     `json:"xp_gained"`
-	NewPersonalBest bool    `json:"new_personal_best"`
-	KO              bool    `json:"ko"`
+	// CrawlFloor is the floor a crawl run was, from 1; absent outside a
+	// crawl.
+	CrawlFloor      int  `json:"crawl_floor,omitempty"`
+	XPGained        int  `json:"xp_gained"`
+	NewPersonalBest bool `json:"new_personal_best"`
+	KO              bool `json:"ko"`
 	// Verified is false for a run that looked scripted (see
 	// game.IsSuspiciousRun); it earned nothing and wasn't saved.
 	Verified bool `json:"verified"`
@@ -51,7 +54,7 @@ type RunSummary struct {
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
 
 func newRunSummary(profile *storage.Profile, msg finishTypingMsg, when time.Time) RunSummary {
-	source := runSource(msg.quotes, msg.custom)
+	source := msg.source()
 	return RunSummary{
 		Profile:         profile.Name,
 		Prestige:        profile.Prestige,
@@ -60,6 +63,7 @@ func newRunSummary(profile *storage.Profile, msg finishTypingMsg, when time.Time
 		Target:          msg.target,
 		Source:          string(source.Kind),
 		SourceName:      source.FileName(),
+		CrawlFloor:      msg.floor.Number,
 		Punctuation:     msg.punctuation,
 		Zen:             msg.zenMode,
 		WPM:             round2(msg.result.WPM),
@@ -86,6 +90,11 @@ func (s RunSummary) Text() string {
 		setup = append(setup, "text "+s.SourceName)
 	case textsource.Drill:
 		setup = append(setup, "drill")
+	case textsource.Crawl:
+		setup = append(setup, fmt.Sprintf("crawl floor %d", s.CrawlFloor))
+		if s.Punctuation {
+			setup = append(setup, "punctuation")
+		}
 	case textsource.WordList:
 		setup = append(setup, "word list "+s.SourceName)
 		if s.Punctuation {

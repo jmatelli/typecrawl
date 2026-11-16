@@ -209,6 +209,7 @@ func (m profileViewModel) View() string {
 		bestWPMLine,
 		fmt.Sprintf("Daily streak: %s", streakStyle.Render(fmt.Sprintf("%d day(s)", m.streakDays))),
 		fmt.Sprintf("Best streak:  %s", streakStyle.Render(fmt.Sprintf("%d mistake-free words", m.profile.BestWordStreak))),
+		deepestFloorLine(m.profile.DeepestFloor),
 		fmt.Sprintf("Successes:    %s   KOs: %s%s",
 			correctStyle.Render(fmt.Sprintf("%d", m.profile.SuccessCount)),
 			wrongStyle.Render(fmt.Sprintf("%d", m.profile.KOCount)),
@@ -395,6 +396,14 @@ func successRateSuffix(successes, kos int) string {
 // model can show them before going back to the profile.
 type prestigedMsg struct {
 	unlocked []achievements.Achievement
+}
+
+// deepestFloorLine shows the profile's crawl record.
+func deepestFloorLine(floor int) string {
+	if floor == 0 {
+		return "Deepest floor: " + dimStyle.Render("no crawl yet")
+	}
+	return "Deepest floor: " + boldStyle.Render(fmt.Sprintf("%d", floor))
 }
 
 // prestigeSuffix is shown after the level once a profile has prestiged.

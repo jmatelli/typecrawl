@@ -21,12 +21,17 @@ type testMode int
 const (
 	modeTime testMode = iota
 	modeWords
+	// modeCrawl is crawl mode: floors of words, HP carried between them.
+	// It isn't saved as the menu's mode (older versions wouldn't know
+	// it); the menu comes back to it after a crawl instead.
+	modeCrawl
 )
 
 // modeString converts a testMode to the string form persisted in the DB
-// (settings, personal bests, test history).
+// (settings, personal bests, test history). A crawl floor is a words
+// run.
 func modeString(m testMode) string {
-	if m == modeWords {
+	if m == modeWords || m == modeCrawl {
 		return "words"
 	}
 	return "time"
@@ -228,11 +233,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch keyMsg.String() {
 	case "tab", "m":
-		if m.mode == modeTime {
-			m.mode = modeWords
-		} else {
-			m.mode = modeTime
-		}
+		m.mode = (m.mode + 1) % (modeCrawl + 1)
 		m.saveSettings()
 	case "left", "h":
 		if m.mode == modeTime && m.timeIdx > 0 {
@@ -249,6 +250,10 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.saveSettings()
 	case "enter":
+		if m.mode == modeCrawl {
+			punctuation := m.punctuation
+			return m, func() tea.Msg { return startTypingMsg{crawl: true, punctuation: punctuation} }
+		}
 		mode := m.mode
 		target := m.currentTarget()
 		punctuation := m.punctuation
@@ -260,19 +265,24 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return startTypingMsg{mode: mode, target: target, punctuation: punctuation, zenMode: zenMode, focusWeak: focusWeak, quotes: quotes, custom: custom}
 		}
 	case "c":
-		if !m.fixedText() { // punctuation is implied whenever the text is typed as written
+		if !m.fixedText() || m.mode == modeCrawl { // punctuation is implied whenever the text is typed as written
 			m.punctuation = !m.punctuation
 			m.saveSettings()
 		}
 	case "z":
-		m.zenMode = !m.zenMode
-		m.saveSettings()
+		if m.mode != modeCrawl { // no zen in a crawl: the HP is the point
+			m.zenMode = !m.zenMode
+			m.saveSettings()
+		}
 	case "f":
-		if !m.fixedText() { // weak-key biasing has no meaning over fixed text
+		if !m.fixedText() && m.mode != modeCrawl { // weak-key biasing has no meaning over fixed text
 			m.focusWeak = !m.focusWeak
 			m.saveSettings()
 		}
 	case "s":
+		if m.mode == modeCrawl {
+			break // a crawl is always the built-in words
+		}
 		// m.punctuation itself is deliberately left untouched here -- it's
 		// the player's own preference, independent of quotes mode. Display
 		// and launch behavior already treat punctuation as on whenever
@@ -330,20 +340,29 @@ func (m menuModel) View() string {
 	challengeLine = lipgloss.JoinVertical(lipgloss.Left, challengeLine, m.weeklyLine())
 
 	modeStr := "Time"
-	if m.mode == modeWords {
+	switch m.mode {
+	case modeWords:
 		modeStr = "Words"
+	case modeCrawl:
+		modeStr = "Crawl"
 	}
 	modeLine := fmt.Sprintf("Mode: %s   (tab to switch)", boldStyle.Render(modeStr))
 
 	var targetLine string
-	if m.mode == modeTime {
+	switch m.mode {
+	case modeCrawl:
+		targetLine = fmt.Sprintf("Floors: %d words, %d more on each; harder words every %d floors, a boss every %d",
+			game.CrawlFirstFloorWords, game.CrawlWordsPerFloor, game.CrawlFloorsPerTier, game.CrawlBossEvery)
+	case modeTime:
 		targetLine = fmt.Sprintf("Duration: %s   (←/→ or h/l to change)", boldStyle.Render(fmt.Sprintf("%ds", m.timeOpts[m.timeIdx])))
-	} else {
+	default:
 		targetLine = fmt.Sprintf("Word count: %s   (←/→ or h/l to change)", boldStyle.Render(fmt.Sprintf("%d", m.wordOpts[m.wordIdx])))
 	}
 
 	pbLine := "Your best: " + dimStyle.Render("no record yet for this mode/duration")
-	if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(m.mode), m.currentTarget(), m.source().Key()); err == nil && pb != nil {
+	if m.mode == modeCrawl {
+		pbLine = deepestFloorLine(m.profile.DeepestFloor)
+	} else if pb, err := storage.GetPersonalBest(m.db, m.profile.ID, modeString(m.mode), m.currentTarget(), m.source().Key()); err == nil && pb != nil {
 		pbLine = fmt.Sprintf("Your best: %s WPM (%s accuracy, %s)",
 			boldStyle.Render(fmt.Sprintf("%.1f", pb.WPM)),
 			boldStyle.Render(fmt.Sprintf("%.0f%%", pb.Accuracy)),
@@ -360,25 +379,32 @@ func (m menuModel) View() string {
 	if m.battle {
 		battleStr = "On"
 	}
+	if m.mode == modeCrawl {
+		sourceStr, sourceHint = "Random words", ""
+	}
 	sourceLine := fmt.Sprintf("Source: %s%s   Battle strip: %s (b)", boldStyle.Render(sourceStr), sourceHint, boldStyle.Render(battleStr))
 
 	punctStr, zenStr, focusStr := "Off", "Off", "Off"
-	if m.punctuation || m.fixedText() {
+	crawl := m.mode == modeCrawl
+	if m.punctuation || (m.fixedText() && !crawl) {
 		punctStr = "On"
 	}
-	if m.zenMode {
+	zenHint := " (z)"
+	if crawl {
+		zenStr, zenHint = "N/A", ""
+	} else if m.zenMode {
 		zenStr = "On"
 	}
 	focusHint := " (f)"
-	if m.fixedText() {
+	if m.fixedText() || crawl {
 		focusStr = "N/A"
 		focusHint = ""
 	} else if m.focusWeak {
 		focusStr = "On"
 	}
 	togglesLine := fmt.Sprintf(
-		"Punctuation: %s (c)   Zen mode: %s (z)   Focus weak keys: %s%s",
-		boldStyle.Render(punctStr), boldStyle.Render(zenStr), boldStyle.Render(focusStr), focusHint,
+		"Punctuation: %s (c)   Zen mode: %s%s   Focus weak keys: %s%s",
+		boldStyle.Render(punctStr), boldStyle.Render(zenStr), zenHint, boldStyle.Render(focusStr), focusHint,
 	)
 
 	help := helpStyle.Render("enter: start   p: profile   u: switch profile   q: quit")
@@ -388,7 +414,10 @@ func (m menuModel) View() string {
 		modeLine, targetLine, pbLine, "",
 		sourceLine, togglesLine, "",
 	}
-	if m.source().Custom() {
+	switch {
+	case crawl:
+		lines = append(lines[:len(lines)-1], dimStyle.Render("HP carries from floor to floor, and a knockout ends the crawl."), "")
+	case m.source().Custom():
 		lines = append(lines[:len(lines)-1], dimStyle.Render("Your own text earns XP and its own bests, but no achievements or challenges."), "")
 	}
 	if m.errMsg != "" {
