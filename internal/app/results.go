@@ -55,6 +55,7 @@ type resultsExtra struct {
 	floor        game.CrawlFloor
 	floorBonusXP int
 	nextFloor    int
+	nextMaxHP    int // the max HP the next floor starts with
 	deepestFloor int
 
 	// unverified marks a run game.IsSuspiciousRun flagged as more likely
@@ -82,11 +83,15 @@ func (m resultsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if m.extra.nextFloor > 0 {
-		// Between floors: on down, or out of the crawl.
+	if m.extra.floor.Number > 0 {
+		// A crawl's results: enter goes on down between floors, and esc
+		// always leaves for the menu, as it does between floors, rather
+		// than quitting.
 		switch keyMsg.String() {
 		case "enter":
-			return m, func() tea.Msg { return nextFloorMsg{} }
+			if m.extra.nextFloor > 0 {
+				return m, func() tea.Msg { return nextFloorMsg{} }
+			}
 		case "esc":
 			return m, func() tea.Msg { return restartMsg{} }
 		}
@@ -246,8 +251,11 @@ func (m resultsModel) floorLine() string {
 	if f.Boss {
 		name = fmt.Sprintf("Floor %d boss", f.Number)
 	}
+	if m.extra.unverified {
+		return wrongStyle.Render("The crawl is over:") + fmt.Sprintf(" %s looked scripted.", strings.ToLower(name[:1])+name[1:])
+	}
 	if m.extra.nextFloor > 0 {
-		return levelUpStyle.Render(name+" cleared!") + fmt.Sprintf("   HP %d/%d carries down to floor %d.", m.extra.hp, m.extra.maxHP, m.extra.nextFloor)
+		return levelUpStyle.Render(name+" cleared!") + fmt.Sprintf("   HP %d/%d carries down to floor %d.", m.extra.hp, max(m.extra.nextMaxHP, m.extra.maxHP), m.extra.nextFloor)
 	}
 	return wrongStyle.Render(fmt.Sprintf("Knocked out on %s.", strings.ToLower(name[:1])+name[1:])) +
 		fmt.Sprintf("   The crawl is over. Deepest floor: %d.", m.extra.deepestFloor)

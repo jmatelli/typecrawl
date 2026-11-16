@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -312,11 +313,33 @@ type crawlRun struct {
 	hp          int
 	shield      bool // an unused golden shield
 	punctuation bool
+	// difficulty is the profile's difficulty level when the crawl began.
+	// The floors' tiers count up from it, so a level-up during the crawl
+	// doesn't move the floors after it up a tier early.
+	difficulty int
+	// missed collects the words missed on every floor, for a drill when
+	// the crawl ends.
+	missed []string
+}
+
+// appendNew returns list with the words of more it doesn't have yet,
+// without changing list.
+func appendNew(list, more []string) []string {
+	out := slices.Clone(list)
+	for _, w := range more {
+		if !slices.Contains(out, w) {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // startCrawl begins a crawl at floor 1 with full HP.
 func (m Model) startCrawl(punctuation bool) (Model, tea.Cmd) {
-	m.crawl = &crawlRun{floor: 1, hp: game.MaxHP(m.profile.Level, m.profile.Prestige), punctuation: punctuation}
+	m.crawl = &crawlRun{
+		floor: 1, hp: game.MaxHP(m.profile.Level, m.profile.Prestige), punctuation: punctuation,
+		difficulty: game.DifficultyLevel(m.profile.Level, m.profile.Prestige),
+	}
 	return m.startFloor()
 }
 
@@ -326,7 +349,7 @@ func (m Model) startCrawl(punctuation bool) (Model, tea.Cmd) {
 // floor is a different length.
 func (m Model) startFloor() (Model, tea.Cmd) {
 	c := m.crawl
-	floor := game.FloorOf(c.floor, game.DifficultyLevel(m.profile.Level, m.profile.Prestige))
+	floor := game.FloorOf(c.floor, c.difficulty)
 	m.typing = newTypingModel(
 		modeWords, floor.Words, m.width, game.MaxHP(m.profile.Level, m.profile.Prestige), floor.Level,
 		c.punctuation, false, false, false, nil, words.Weak{}, nil, nil,
@@ -436,7 +459,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.start(msg)
 
 	case nextFloorMsg:
-		if m.crawl == nil {
+		// Only from the results between floors: a second enter pressed
+		// before the floor appeared mustn't start it over.
+		if m.crawl == nil || m.state != stateResults {
 			return m, nil
 		}
 		return m.startFloor()
@@ -447,7 +472,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// game.IsSuspiciousRun) -- show the raw numbers but touch
 			// nothing persisted: no XP, no personal best, no streak or
 			// achievement progress.
-			m.results = newResultsModel(msg.result, m.width, resultsExtra{unverified: true})
+			m.results = newResultsModel(msg.result, m.width, resultsExtra{unverified: true, floor: msg.floor})
 			m.state = stateResults
 			m.crawl = nil // the anti-cheat check ends a crawl, as it ends a run
 			run := newRunSummary(m.profile, msg, time.Now())
@@ -479,7 +504,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if beforeBestOverall != nil {
 			beforeBestWPM = beforeBestOverall.WPM
 		}
-		beforeProgress := buildAchievementProgress(m.db, m.profile, beforeDailyStreak, beforeBestWPM)
+		beforeAchievementWPM, _ := storage.AchievementWPM(m.db, m.profile.ID)
+		beforeProgress := buildAchievementProgress(m.db, m.profile, beforeDailyStreak, beforeAchievementWPM)
 
 		_ = storage.RecordActivity(m.db, m.profile.ID, now) // best-effort; shows up on the profile's activity graph
 		_ = storage.RecordMistakes(m.db, m.profile.ID, msg.charMistakes, msg.pairMistakes, now)
@@ -598,17 +624,16 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A cleared floor leads on to the next one, carrying the HP and
 		// any unused golden shield; a knockout ends the crawl.
 		var nextFloor int
-		if c := m.crawl; c != nil && floor.Number > 0 {
-			if msg.ko {
-				m.crawl = nil
-			} else {
-				c.floor, c.hp, c.shield = floor.Number+1, msg.hp, msg.shieldLeft
-				nextFloor = c.floor
-			}
-		}
 		missedWords := msg.missedWords
-		if nextFloor > 0 {
-			missedWords = nil // a drill would leave the crawl; it's offered when the crawl ends
+		if c := m.crawl; c != nil && floor.Number > 0 {
+			missedWords = appendNew(c.missed, msg.missedWords)
+			if msg.ko {
+				m.crawl = nil // the drill on the final screen covers every floor
+			} else {
+				c.floor, c.hp, c.shield, c.missed = floor.Number+1, msg.hp, msg.shieldLeft, missedWords
+				nextFloor = c.floor
+				missedWords = nil // a drill would leave the crawl; it's offered when the crawl ends
+			}
 		}
 
 		m.results = newResultsModel(msg.result, m.width, resultsExtra{
@@ -641,6 +666,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			floorBonusXP:          floorBonusXP,
 			nextFloor:             nextFloor,
 			deepestFloor:          m.profile.DeepestFloor,
+			// A level-up can raise the max HP the next floor starts with.
+			nextMaxHP: game.MaxHP(m.profile.Level, m.profile.Prestige),
 		})
 
 		run := newRunSummary(m.profile, msg, now)
@@ -649,13 +676,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		run.NewPersonalBest = isNewPB
 		m.runs = append(m.runs, sessionRun{summary: run})
 
-		// The speed achievements go by the best WPM on the built-in text,
-		// which a custom run leaves where it was.
-		achievementBestWPM := max(beforeBestWPM, personalBest)
-		if ownText {
-			achievementBestWPM = beforeBestWPM
-		}
-		afterProgress := buildAchievementProgress(m.db, m.profile, streakDays, achievementBestWPM)
+		// The speed achievements go by the best WPM on the built-in text
+		// (see storage.AchievementWPM), which a custom run or a drill
+		// leaves where it was.
+		afterAchievementWPM, _ := storage.AchievementWPM(m.db, m.profile.ID)
+		afterProgress := buildAchievementProgress(m.db, m.profile, streakDays, afterAchievementWPM)
 		if unlocked := newlyUnlocked(beforeProgress, afterProgress); len(unlocked) > 0 {
 			m.achievementUnlock = newAchievementUnlockModel(unlocked)
 			m.state = stateAchievementUnlock
@@ -699,7 +724,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case restartMsg:
 		// Back to the menu ends any crawl; the menu stays on crawl mode
 		// if that's what was just played.
-		wasCrawl := m.crawl != nil || (len(m.runs) > 0 && m.runs[len(m.runs)-1].summary.Source == string(textsource.Crawl))
+		wasCrawl := m.crawl != nil ||
+			(m.state == stateResults && len(m.runs) > 0 && m.runs[len(m.runs)-1].summary.Source == string(textsource.Crawl))
 		m.crawl = nil
 		m.menu = newMenuModel(m.profile, m.db)
 		if wasCrawl {

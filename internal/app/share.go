@@ -24,7 +24,7 @@ type RunSummary struct {
 	FinishedAt time.Time `json:"finished_at"`
 	Mode       string    `json:"mode"`   // "time" or "words"
 	Target     int       `json:"target"` // seconds for "time", words for "words"
-	Source     string    `json:"source"` // "random", "quotes", "wordlist", "text" or "drill"
+	Source     string    `json:"source"` // "random", "quotes", "wordlist", "text", "drill" or "crawl"
 	// SourceName is a word list's or text's file name, without the
 	// directories leading to it, which can say more than a player means
 	// to share. Empty for the built-in sources.

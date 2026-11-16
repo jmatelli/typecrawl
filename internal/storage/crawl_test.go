@@ -67,3 +67,33 @@ func TestCrawlRunsInStorageAndBackups(t *testing.T) {
 		t.Fatal("expected a crawl personal best refused")
 	}
 }
+
+// A floor finished faster than any personal best counts for the speed
+// achievements; a knockout floor and a custom run don't.
+func TestAchievementWPMCountsCrawlFloors(t *testing.T) {
+	db, p := newTestDB(t)
+	if _, err := RecordPersonalBest(db, p.ID, "time", 30, "random", 60, 99, nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordPersonalBest(db, p.ID, "time", 30, "wordlist:/a.txt", 150, 99, nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		wpm float64
+		ko  bool
+	}{{85, false}, {120, true}} {
+		if err := RecordTestResult(db, p.ID, r.wpm, 95, "words", 15, r.ko, true, false, "crawl", 15, 20*time.Second, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _ := AchievementWPM(db, p.ID); got != 85 {
+		t.Fatalf("expected 85 from the cleared floor, got %v", got)
+	}
+	if n, _ := PunctuationRunCount(db, p.ID); n != 2 {
+		t.Fatalf("expected punctuated floors counted, got %d", n)
+	}
+	empty, q := newTestDB(t)
+	if got, _ := AchievementWPM(empty, q.ID); got != 0 {
+		t.Fatalf("expected 0 with nothing recorded, got %v", got)
+	}
+}

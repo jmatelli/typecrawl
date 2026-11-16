@@ -293,7 +293,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.saveSettings()
 	case "x":
 		// Forget the selected saved file. Its runs and personal bests stay.
-		if c := m.custom(); c.Custom() {
+		if c := m.custom(); c.Custom() && m.mode != modeCrawl {
 			_ = storage.ForgetCustomSource(m.db, m.profile.ID, c.Key())
 			m.customSources = append(m.customSources[:m.customIdx:m.customIdx], m.customSources[m.customIdx+1:]...)
 			m.customIdx = -1

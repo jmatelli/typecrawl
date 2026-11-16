@@ -1116,6 +1116,19 @@ func WeekTotalsBetween(db *sql.DB, profileID int64, from, to time.Time, minWPM f
 // nothing but "a").
 const builtinSource = "source IN ('random', 'quotes', 'crawl')"
 
+// AchievementWPM is the best speed that counts toward the speed
+// achievements: the best personal best on the built-in text, or a crawl
+// floor finished faster (floors keep no personal best, but they're on the
+// built-in words too). 0 if there's neither.
+func AchievementWPM(db *sql.DB, profileID int64) (float64, error) {
+	var best float64
+	err := db.QueryRow(`
+		SELECT MAX(COALESCE((SELECT MAX(best_wpm) FROM personal_bests WHERE profile_id = ? AND `+builtinSource+`), 0),
+		           COALESCE((SELECT MAX(wpm) FROM test_history WHERE profile_id = ? AND ko = 0 AND source = 'crawl'), 0))
+	`, profileID, profileID).Scan(&best)
+	return best, err
+}
+
 // SaveCustomSource adds source (a textsource.Source key) to profileID's
 // saved custom sources, which the menu lets the player pick from. Saving
 // one already there changes nothing.
@@ -1511,15 +1524,16 @@ func HasPerfectComebackAfterKO(db *sql.DB, profileID int64) (bool, error) {
 	return perfect, err
 }
 
-// PunctuationRunCount returns how many random-words exercises profileID has
-// completed with punctuation enabled. Scoped to source = 'random' -- a
+// PunctuationRunCount returns how many random-words exercises (crawl
+// floors included) profileID has completed with punctuation enabled.
+// Scoped to those sources -- a
 // quotes-mode run also has punctuation = 1 (it's forced on, see
 // newTypingModel), but it already has its own dedicated achievement line
 // (QuoteRunCount/"Bookworm"), so counting it here too would double-count
 // the same run under two different achievements.
 func PunctuationRunCount(db *sql.DB, profileID int64) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND punctuation = 1 AND source = 'random'`, profileID).Scan(&n)
+	err := db.QueryRow(`SELECT COUNT(*) FROM test_history WHERE profile_id = ? AND punctuation = 1 AND source IN ('random', 'crawl')`, profileID).Scan(&n)
 	return n, err
 }
 
