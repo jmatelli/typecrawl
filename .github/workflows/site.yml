@@ -1,0 +1,54 @@
+name: site
+
+# Copies the landing page in site/ to Typecrawl/typecrawl.github.io, which
+# publishes it at https://typecrawl.github.io/. The demo recording is kept in
+# docs/ because the README shows it from there, so it is copied in as well.
+#
+# Pushing needs SITE_DEPLOY_KEY: the private half of a deploy key with write
+# access on Typecrawl/typecrawl.github.io, and on that repo only.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/demo.gif"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Typecrawl/typecrawl.github.io
+          ssh-key: ${{ secrets.SITE_DEPLOY_KEY }}
+          path: out
+
+      - name: Copy the site
+        run: |
+          rsync -a --delete --exclude .git site/ out/
+          cp docs/demo.gif out/demo.gif
+
+      - name: Push
+        working-directory: out
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The site is already up to date."
+            exit 0
+          fi
+          git commit -m "Sync from jmatelli/typecrawl@${GITHUB_SHA::7}"
+          git push
