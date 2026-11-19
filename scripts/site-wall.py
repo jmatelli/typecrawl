@@ -78,11 +78,11 @@ for hgt in heights:
 
 out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">']
 out.append("""<defs>
-<linearGradient id="shade" x1="0" y1="0" x2="0.15" y2="1">
-  <stop offset="0" stop-color="#ffe2bd" stop-opacity=".09"/>
-  <stop offset=".35" stop-color="#ffe2bd" stop-opacity="0"/>
-  <stop offset="1" stop-color="#000" stop-opacity=".32"/>
-</linearGradient>
+<radialGradient id="shade" cx=".5" cy=".48" r=".72">
+  <stop offset="0" stop-color="#ffe2bd" stop-opacity=".05"/>
+  <stop offset=".55" stop-color="#ffe2bd" stop-opacity="0"/>
+  <stop offset="1" stop-color="#000" stop-opacity=".26"/>
+</radialGradient>
 <filter id="grit" x="0" y="0" width="100%" height="100%">
   <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="3" stitchTiles="stitch"/>
   <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -1.6 1.05"/>
@@ -98,12 +98,9 @@ for pts, l in stones:
     r, g, b = int(52 + 26 * l), int(39 + 19 * l), int(29 + 13 * l)
     d = path(pts)
     out.append(f'<path d="{d}" fill="rgb({r} {g} {b})" fill-opacity=".62"/>')
+    # A slightly rounded face: lit in the middle, darker toward every edge, so the
+    # stones sit flush and only the mortar between them is recessed.
     out.append(f'<path d="{d}" fill="url(#shade)"/>')
-    # A faint lit edge along the top, as if the torches catch it.
-    top = [q for q in pts if q[1] < min(v for _, v in pts) + 3.5]
-    if len(top) > 1:
-        top.sort()
-        out.append('<path d="M' + ' L'.join(f'{a:.1f} {b + .8:.1f}' for a, b in top) + '" fill="none" stroke="#ffd9a8" stroke-opacity=".10" stroke-width="1.2" stroke-linecap="round"/>')
 # Grime and damp patches over everything, then fine grit.
 out.append(f'<rect width="{W}" height="{H}" filter="url(#damp)" opacity=".55"/>')
 out.append(f'<rect width="{W}" height="{H}" filter="url(#grit)" opacity=".5"/>')
