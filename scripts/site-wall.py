@@ -47,7 +47,11 @@ def crack(x, y, w, h):
         if py > y + h - MORTAR:
             break
         pts.append((px, py))
-    return "M" + " L".join(f"{a:.1f} {b:.1f}" for a, b in pts)
+    return pts
+
+
+def shift(pts, dx):
+    return [(a + dx, b) for a, b in pts]
 
 
 # Rows of uneven height that add up to the tile's height exactly.
@@ -58,31 +62,37 @@ while total < H - 70:
     total += hgt
 heights.append(H - total)
 
-stones, cracks, chips = [], [], []
+stones, cracks = [], []
 y = 0
 for hgt in heights:
-    x = R.uniform(-80, 0)  # start before 0 so the row wraps around the tile
-    start = x
-    while x < start + W:
+    # Widths that add up to the tile's width exactly, so the row wraps around
+    # with no stone overlapping another. A leftover too narrow for a stone of
+    # its own goes to the last one.
+    widths, left = [], W
+    while left > 0:
         w = R.choice([R.uniform(70, 110), R.uniform(100, 160), R.uniform(140, 200)])
-        w = min(w, start + W - x) if start + W - x > 45 else w
-        cell = (x, y, w, hgt)
+        if left - w < 45:
+            w = left
+        widths.append(w)
+        left -= w
+    x = R.uniform(-80, 0)  # start before 0 so the joints don't line up with the tile edge
+    for w in widths:
+        pts = stone(x, y, w, hgt)
+        lines = [crack(x, y, w, hgt)] if R.random() < 0.16 else []
         lightness = R.uniform(0.0, 1.0)
-        for dx in (0, W, -W):  # draw copies so stones crossing an edge tile seamlessly
+        # A stone crossing the tile's edge is drawn again, the same shape, on the other side.
+        for dx in (0, W, -W):
             if x + dx < W and x + dx + w > 0:
-                stones.append((stone(x + dx, y, w, hgt), lightness))
-                if R.random() < 0.16:
-                    cracks.append(crack(x + dx, y, w, hgt))
+                stones.append(([(a + dx, b) for a, b in pts], lightness))
+                cracks.extend(shift(c, dx) for c in lines)
         x += w
     y += hgt
 
 out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">']
 out.append("""<defs>
-<radialGradient id="shade" cx=".5" cy=".48" r=".72">
-  <stop offset="0" stop-color="#ffe2bd" stop-opacity=".05"/>
-  <stop offset=".55" stop-color="#ffe2bd" stop-opacity="0"/>
-  <stop offset="1" stop-color="#000" stop-opacity=".26"/>
-</radialGradient>
+<filter id="soft" x="-5%" y="-5%" width="110%" height="110%">
+  <feGaussianBlur stdDeviation="2.2"/>
+</filter>
 <filter id="grit" x="0" y="0" width="100%" height="100%">
   <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="3" stitchTiles="stitch"/>
   <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -1.6 1.05"/>
@@ -98,13 +108,18 @@ for pts, l in stones:
     r, g, b = int(52 + 26 * l), int(39 + 19 * l), int(29 + 13 * l)
     d = path(pts)
     out.append(f'<path d="{d}" fill="rgb({r} {g} {b})" fill-opacity=".62"/>')
-    # A slightly rounded face: lit in the middle, darker toward every edge, so the
-    # stones sit flush and only the mortar between them is recessed.
-    out.append(f'<path d="{d}" fill="url(#shade)"/>')
+# Each stone darkens evenly toward its edges: a blurred dark outline, the inner half
+# of which falls on the stone (the outer half is lost in the mortar). Every stone
+# gets the same treatment, so they sit flush and only the mortar reads as recessed.
+out.append('<g filter="url(#soft)" fill="none" stroke="#000" stroke-opacity=".38" stroke-width="7" stroke-linejoin="round">')
+for pts, _ in stones:
+    out.append(f'<path d="{path(pts)}"/>')
+out.append('</g>')
 # Grime and damp patches over everything, then fine grit.
 out.append(f'<rect width="{W}" height="{H}" filter="url(#damp)" opacity=".55"/>')
 out.append(f'<rect width="{W}" height="{H}" filter="url(#grit)" opacity=".5"/>')
-for d in cracks:
+for c in cracks:
+    d = "M" + " L".join(f"{a:.1f} {b:.1f}" for a, b in c)
     out.append(f'<path d="{d}" fill="none" stroke="#000" stroke-opacity=".55" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>')
 out.append("</svg>")
 print("\n".join(out))
