@@ -1,8 +1,7 @@
 name: site
 
 # Copies the landing page in site/ to Typecrawl/typecrawl.github.io, which
-# publishes it at https://typecrawl.github.io/. The demo recording is kept in
-# docs/ because the README shows it from there, so it is copied in as well.
+# publishes it at https://typecrawl.github.io/.
 #
 # Pushing needs SITE_DEPLOY_KEY: the private half of a deploy key with write
 # access on Typecrawl/typecrawl.github.io, and on that repo only.
@@ -12,7 +11,6 @@ on:
     branches: [main]
     paths:
       - "site/**"
-      - "docs/demo.gif"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
@@ -36,9 +34,7 @@ jobs:
           path: out
 
       - name: Copy the site
-        run: |
-          rsync -a --delete --exclude .git site/ out/
-          cp docs/demo.gif out/demo.gif
+        run: rsync -a --delete --exclude .git site/ out/
 
       - name: Push
         working-directory: out

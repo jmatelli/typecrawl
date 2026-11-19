@@ -104,9 +104,20 @@ code, kbd, .mono { font-family: var(--mono); font-variant-ligatures: none; }
 body > header { position: relative; z-index: 2; }
 .bricks {
   position: absolute; inset: 0; pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='56'%3E%3Cpath d='M0 .5h120M0 28.5h120M.5 0v28M60.5 28v28' stroke='%23ffe9cc' stroke-opacity='.05' fill='none'/%3E%3C/svg%3E");
-  -webkit-mask-image: radial-gradient(110% 80% at 50% 0%, #000 30%, transparent 75%);
-  mask-image: radial-gradient(110% 80% at 50% 0%, #000 30%, transparent 75%);
+  /* Rough stonework, made by scripts/site-wall.py. The tile is
+     offset so its seam doesn't line up with the page edge. */
+  background: url("wall.svg") -137px -23px / 720px 440px;
+  opacity: .55;
+  -webkit-mask-image: radial-gradient(115% 85% at 50% 0%, #000 35%, transparent 78%);
+  mask-image: radial-gradient(115% 85% at 50% 0%, #000 35%, transparent 78%);
+}
+/* Torchlight: the wall is lit warm near the torches and falls into shadow between and below them. */
+.bricks::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(420px 380px at max(21px, calc(50% - 671px)) 140px, rgb(255 150 60 / 0.10), transparent 70%),
+    radial-gradient(420px 380px at min(calc(100% - 21px), calc(50% + 671px)) 140px, rgb(255 150 60 / 0.10), transparent 70%),
+    radial-gradient(70% 60% at 50% 35%, transparent 40%, rgb(0 0 0 / 0.35));
 }
 .torch { position: absolute; top: 120px; width: 18px; height: 70px; pointer-events: none; }
 .torch.l { left: max(12px, calc(50% - 680px)); }
