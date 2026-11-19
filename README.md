@@ -4,7 +4,7 @@ A terminal-based typing test, inspired by [monkeytype](https://monkeytype.com), 
 progression system layered on top: XP and leveling, an HP/combo mechanic for mistakes, achievements,
 daily challenges, and a "ghost" race against your own personal best.
 
-![Typecrawl demo](docs/demo.gif)
+![Typecrawl demo](site/demo.gif)
 
 ## Install
 
